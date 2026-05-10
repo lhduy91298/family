@@ -1,0 +1,35 @@
+name: Workflow 5 - Debug Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Hành động Debug'
+        required: true
+        type: choice
+        options:
+          - check_webhook
+          - tail_worker
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Check Webhook
+        if: ${{ inputs.action == 'check_webhook' }}
+        run: |
+          echo "Kiểm tra Webhook Info:"
+          curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/getWebhookInfo" | jq .
+
+      - name: Tail Worker Logs
+        if: ${{ inputs.action == 'tail_worker' }}
+        # To run tail in CI, it streams endlessly so we just timeout after 30s
+        run: |
+          npm install -g wrangler
+          timeout 30s wrangler tail --format json || true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}

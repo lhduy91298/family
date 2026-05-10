@@ -1,0 +1,16 @@
+{
+  "name": "family-expense-bot-worker",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev":    "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail":   "wrangler tail"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "wrangler":              "^3.0.0",
+    "@cloudflare/workers-types": "^4.0.0",
+    "typescript":            "^5.0.0"
+  }
+}
