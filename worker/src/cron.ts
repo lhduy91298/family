@@ -28,14 +28,34 @@ export async function dailySalaryCheck(env: Env): Promise<void> {
   const note   = (dow15 === 6 || dow15 === 0)
     ? '\n(Ngày 15 là cuối tuần nên nhắc sớm hôm nay)' : '';
 
-  const name = env.HUSBAND_NAME || 'Chong';
-  const msg  =
-    `💴 NHẮC LƯƠNG ${formatMonthDisplay(month).toUpperCase()}\n\n` +
-    `${name} ơi, hôm nay là ngày lãnh lương! 🎉${note}\n\n` +
-    `Nhập lương tháng này:\n/luong [số tiền]\n\nVí dụ: /luong 20万`;
-
-  await sendMessage(env, env.HUSBAND_ID, msg);
+  await sendMessage(env, env.HUSBAND_ID,
+    `🔔 Hôm nay là ngày nhận lương! ${note}\n\n` +
+    `Nhập nhanh qua web: https://family-expense-dashboard.pages.dev/\n` +
+    `Hoặc gõ /luong [số tiền] để ghi nhận ngay!`
+  );
   console.log('[SALARY_CHECK] Da gui nhac luong', month);
+}
+
+// Chạy mỗi giờ (0 * * * *)
+export async function autoSendEmailTask(env: Env): Promise<void> {
+  const { getUnsentCompletedMonths, markEmailSent } = await import('./supabase');
+  const { sendMonthlyEmailToWife } = await import('./email');
+  
+  const rows = await getUnsentCompletedMonths(env);
+  for (const row of rows) {
+    if (row.luong > 0 && row.tien_an > 0 && row.tien_no > 0) {
+      const updatedAt = row.cap_nhat_luc ? new Date(row.cap_nhat_luc).getTime() : 0;
+      const now = Date.now();
+      const diffHours = (now - updatedAt) / (1000 * 60 * 60);
+      
+      if (diffHours >= 2) {
+        const surplus = row.luong - row.tien_an - row.tien_no + (row.tien_khac || 0);
+        await sendMonthlyEmailToWife(env, row.thang, row.luong, row.tien_an, row.tien_no, row.tien_khac || 0, row.ten_khac || null, surplus, row.tich_luy);
+        await markEmailSent(env, row.thang);
+        await sendMessage(env, env.HUSBAND_ID, `🤖 Đã tự động gửi email báo cáo tháng ${formatMonthDisplay(row.thang)} cho vợ (do đã nhập xong được hơn 2 tiếng).`);
+      }
+    }
+  }
 }
 
 // Nhắc nếu chưa nhập đủ sau 3 ngày kể từ ngày lương

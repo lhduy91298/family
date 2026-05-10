@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS theo_doi (
   nhap_luong_luc  TIMESTAMPTZ,                    -- Thời điểm nhập lương (JST)
   nhap_an_luc     TIMESTAMPTZ,                    -- Thời điểm nhập tiền ăn
   nhap_no_luc     TIMESTAMPTZ,                    -- Thời điểm nhập tiền nợ
-  nhap_khac_luc   TIMESTAMPTZ                     -- Thời điểm nhập tiền khác
+  nhap_khac_luc   TIMESTAMPTZ,                    -- Thời điểm nhập tiền khác
+  cap_nhat_luc    TIMESTAMPTZ,                    -- Thời điểm có bất kỳ thay đổi nào cuối cùng
+  email_da_gui    BOOLEAN     NOT NULL DEFAULT false -- Đã gửi email cho vợ chưa
 );
 
 -- Index để query nhanh theo thang

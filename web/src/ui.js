@@ -9,9 +9,11 @@ export function renderApp(rows, currentMonth) {
   const current = rows.find(r => r.thang === currentMonth) || null;
   const latest  = rows.find(r => r.tich_luy > 0) || rows[0] || null;
 
+  // Render tổng tích lũy vào header banner
+  renderCumulative(latest);
+
   app.innerHTML = `
     ${renderCurrentMonth(current, currentMonth)}
-    ${renderCumulative(latest)}
     <div id="pie-section"></div>
     <div id="chart-section"></div>
     <div id="trend-section"></div>
@@ -107,7 +109,7 @@ export function renderPieChart(rows, currentMonth) {
 
   pieSection.innerHTML = `
     <p class="section-label">Phân bổ chi tiêu ${formatMonthDisplay(currentMonth).replace('tháng ', '')}</p>
-    <div class="card chart-container" style="height:260px;">
+    <div class="card chart-container" style="height:280px;">
       <canvas id="pieChart"></canvas>
     </div>
   `;
@@ -115,6 +117,7 @@ export function renderPieChart(rows, currentMonth) {
   const ctx = document.getElementById('pieChart').getContext('2d');
   new Chart(ctx, {
     type: 'doughnut',
+    plugins: [ChartDataLabels],
     data: {
       labels: ['Tiền ăn', 'Tiền nợ', 'Tiền khác', 'Tiền dư'],
       datasets: [{
@@ -128,7 +131,7 @@ export function renderPieChart(rows, currentMonth) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      cutout: '60%',
+      cutout: '55%',
       plugins: {
         legend: {
           position: 'bottom',
@@ -152,6 +155,17 @@ export function renderPieChart(rows, currentMonth) {
               return ` ${context.label}: ¥${context.parsed.toLocaleString()} (${pct}%)`;
             }
           }
+        },
+        datalabels: {
+          color: '#fff',
+          font: { family: 'Inter', size: 12, weight: '700' },
+          formatter: (value, ctx) => {
+            const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+            const pct = total > 0 ? Math.round(value / total * 100) : 0;
+            return pct >= 5 ? pct + '%' : '';
+          },
+          textShadowBlur: 4,
+          textShadowColor: 'rgba(0,0,0,0.3)',
         }
       }
     }
@@ -269,8 +283,7 @@ function renderCurrentMonth(row, currentMonth) {
     if (!complete) return `<span class="pending tag-incomplete">—</span>`;
     const s = row.du_thang;
     const cls = s >= 0 ? 'surplus' : 'deficit';
-    const sign = s >= 0 ? '+' : '-';
-    return `<span class="row-value ${cls}">${sign}${formatMoney(s)}</span>`;
+    return `<span class="row-value ${cls}">${formatMoney(s)}</span>`;
   };
 
   const otherRow = () => {
@@ -282,7 +295,6 @@ function renderCurrentMonth(row, currentMonth) {
         </div>
       `;
     }
-    const oSign = row.tien_khac >= 0 ? '+' : '-';
     const oCls = row.tien_khac >= 0 ? 'surplus' : 'deficit';
 
     // Parse chi tiết từng mục từ ten_khac
@@ -291,12 +303,11 @@ function renderCurrentMonth(row, currentMonth) {
       const entries = parseOtherEntries(row.ten_khac);
       if (entries.length > 0) {
         const items = entries.map(e => {
-          const sign = e.amount >= 0 ? '+' : '-';
           const cls = e.amount >= 0 ? 'surplus' : 'deficit';
           return `
             <div class="other-detail-item">
               <span>${e.name}</span>
-              <span class="${cls}">${sign}${formatMoney(e.amount)}</span>
+              <span class="${cls}">${formatMoney(e.amount)}</span>
             </div>
           `;
         }).join('');
@@ -310,7 +321,7 @@ function renderCurrentMonth(row, currentMonth) {
     return `
       <div class="row row-clickable" ${hasDetail ? 'onclick="toggleOtherDetail()"' : ''}>
         <span class="row-label"><span class="icon icon-other">📦</span>Tiền khác ${chevron}</span>
-        <span class="row-value ${oCls}">${oSign}${formatMoney(row.tien_khac)}</span>
+        <span class="row-value ${oCls}">${formatMoney(row.tien_khac)}</span>
       </div>
       ${detailHtml}
     `;
@@ -337,21 +348,49 @@ function renderCurrentMonth(row, currentMonth) {
         ${surplusVal()}
       </div>
     </div>
+    
+    <button class="btn-edit" onclick="toggleEditForm()">✏️ Nhập / Sửa Dữ Liệu</button>
+    <div id="edit-form" class="card edit-form" style="display: none;">
+      <div class="form-group">
+        <label>💰 Lương (¥)</label>
+        <input type="number" id="input-salary" placeholder="VD: 200000" value="${row?.luong || ''}">
+      </div>
+      <div class="form-group">
+        <label>🍜 Tiền ăn (¥)</label>
+        <input type="number" id="input-food" placeholder="VD: 50000" value="${row?.tien_an || ''}">
+      </div>
+      <div class="form-group">
+        <label>💳 Tiền nợ (¥)</label>
+        <input type="number" id="input-debt" placeholder="VD: 30000" value="${row?.tien_no || ''}">
+      </div>
+      <div class="form-group">
+        <label>📦 Tiền khác (¥)</label>
+        <div style="display: flex; gap: 8px;">
+          <input type="number" id="input-other-amount" placeholder="VD: -20000" style="flex: 1;">
+          <input type="text" id="input-other-name" placeholder="Ghi chú (Mua quà)" style="flex: 2;">
+        </div>
+        <small style="color:var(--c-muted); margin-top:4px; display:block;">Nhập âm (-) nếu là chi, dương nếu là thu thêm.</small>
+      </div>
+      <button class="btn-save" onclick="saveData()" id="btn-save">💾 Lưu Thay Đổi</button>
+      <div id="save-status" style="margin-top: 10px; font-size: 13px; font-weight: 500; text-align: center;"></div>
+    </div>
   `;
 }
 
-// Card tổng tích lũy
+// Render tổng tích lũy vào header banner
 function renderCumulative(latest) {
+  const slot = document.getElementById('cumul-banner-slot');
+  if (!slot) return;
   const total = latest?.tich_luy || 0;
-  const sign  = total >= 0 ? '+' : '';
-  return `
-    <p class="section-label">Tổng tích lũy</p>
-    <div class="cumul-card">
-      <div class="cumul-info">
-        <div class="label">Tổng dư tất cả tháng</div>
-        <div class="value">${sign}${formatMoney(total)}</div>
+  slot.innerHTML = `
+    <div class="cumul-banner">
+      <div class="cumul-left">
+        <div class="cumul-emoji">💰</div>
+        <div>
+          <div class="cumul-label">Tổng tích lũy</div>
+          <div class="cumul-value">${formatMoney(total)}</div>
+        </div>
       </div>
-      <div class="cumul-icon">🏦</div>
     </div>
   `;
 }
@@ -365,11 +404,10 @@ function renderHistory(rows) {
   const trs = rows.map(row => {
     const surplus   = row.du_thang;
     const complete  = isComplete(row);
-    const sign      = surplus >= 0 ? '+' : '-';
     const cls       = !complete ? '' : surplus >= 0 ? 'surplus' : 'deficit';
     const rowCls    = !complete ? '' : surplus < 0 ? 'deficit-row' : '';
     const surplusStr = complete
-      ? `<span class="${cls}">${sign}${formatMoney(surplus)}</span>`
+      ? `<span class="${cls}">${formatMoney(surplus)}</span>`
       : `<span class="tag-incomplete">chưa đủ</span>`;
 
     return `

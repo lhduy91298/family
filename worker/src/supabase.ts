@@ -98,6 +98,7 @@ export async function writeField(
     thang:          month,
     [colMap[field]]: value,
     [atMap[field]]:  nowISO,
+    cap_nhat_luc:    nowISO,
   };
   if (field === 'salary' && extraStr) body.ngay_luong = extraStr;
   if (field === 'other' && extraStr) body.ten_khac = extraStr;
@@ -111,6 +112,7 @@ export async function writeSurplus(env: Env, month: string, surplus: number, cum
   await supabasePatch(env, `/theo_doi?thang=eq.${month}`, {
     du_thang: surplus,
     tich_luy: cumulative,
+    cap_nhat_luc: new Date().toISOString()
   });
   console.log(`[SURPLUS] month:${month} surplus:${surplus} cumul:${cumulative}`);
 }

@@ -14,6 +14,16 @@ import {
   getSalaryReminderDay,
 } from './parser';
 
+// Helper: tính lại dư tháng + tích lũy khi có thay đổi bất kỳ
+export async function recalcSurplus(env: Env, month: string): Promise<{ surplus: number; cumul: number; row: any } | null> {
+  const row = await getMonthRow(env, month);
+  if (!row || row.luong === 0 || row.tien_an === 0 || row.tien_no === 0) return null;
+  const surplus = row.luong - row.tien_an - row.tien_no + (row.tien_khac || 0);
+  const cumul   = await calcCumulativeSurplus(env, month, surplus);
+  await writeSurplus(env, month, surplus, cumul);
+  return { surplus, cumul, row };
+}
+
 export async function handleWebhook(request: Request, env: Env): Promise<void> {
   const update = await request.json() as any;
   if (!update?.message?.text) return;
@@ -60,6 +70,8 @@ async function routeCommand(env: Env, chatId: number, userName: string, text: st
     await handleYearReport(env, chatId);
   } else if (lower === '/so sanh' || lower === '/sosanh' || lower === '/so_sanh') {
     await handleCompare(env, chatId);
+  } else if (lower === '/gui mail' || lower === '/gửi mail') {
+    await handleSendEmail(env, chatId);
   } else if (lower === '/giúp đỡ' || lower === '/giupdo' || lower === '/start' || lower === '/help') {
     await handleHelp(env, chatId);
   } else {
@@ -155,11 +167,9 @@ async function handleDebt(env: Env, chatId: number, userName: string, text: stri
   await writeField(env, month, 'debt', amount);
   console.log(`[DEBT] ${month} amount:${amount} by:${userName}`);
 
-  const updated = await getMonthRow(env, month);
-  if (!updated) return;
-  const surplus = updated.luong - updated.tien_an - updated.tien_no + (updated.tien_khac || 0);
-  const cumul   = await calcCumulativeSurplus(env, month, surplus);
-  await writeSurplus(env, month, surplus, cumul);
+  const result = await recalcSurplus(env, month);
+  if (!result) return;
+  const { surplus, cumul, row: updated } = result;
   await sendMessage(env, chatId, buildMonthReport(month, updated.luong, updated.tien_an, updated.tien_no, updated.tien_khac || 0, updated.ten_khac || null, surplus, cumul));
 
   // Cảnh báo chi tiêu
@@ -169,7 +179,6 @@ async function handleDebt(env: Env, chatId: number, userName: string, text: stri
       `Cần xem lại chi tiêu để cân đối ngân sách. 📉`
     );
   } else {
-    // So sánh với tháng trước
     const lastMonth = getLastMonthJST();
     const lastRow = await getMonthRow(env, lastMonth);
     if (lastRow && lastRow.du_thang > 0) {
@@ -182,10 +191,6 @@ async function handleDebt(env: Env, chatId: number, userName: string, text: stri
       }
     }
   }
-
-  // Gửi email báo cáo cho vợ sau khi nhập đầy đủ
-  await sendMonthlyEmailToWife(env, month, updated.luong, updated.tien_an, updated.tien_no, updated.tien_khac || 0, updated.ten_khac || null, surplus, cumul);
-  await sendMessage(env, chatId, '📧 Đã gửi email báo cáo cho vợ!');
 }
 
 // ── /khac ───────────────────────────────────────────────────
@@ -213,12 +218,12 @@ async function handleOther(env: Env, chatId: number, userName: string, text: str
   await writeField(env, month, 'other', newAmount, newName);
   console.log(`[OTHER] ${month} amount:${newAmount} name:${newName} by:${userName}`);
 
-  const updated = await getMonthRow(env, month);
-  if (!updated) return;
-  const surplus = updated.luong - updated.tien_an - updated.tien_no + (updated.tien_khac || 0);
-  const cumul   = await calcCumulativeSurplus(env, month, surplus);
-  await writeSurplus(env, month, surplus, cumul);
-  await sendMessage(env, chatId, buildMonthReport(month, updated.luong, updated.tien_an, updated.tien_no, updated.tien_khac || 0, updated.ten_khac || null, surplus, cumul));
+  const result = await recalcSurplus(env, month);
+  if (result) {
+    await sendMessage(env, chatId, buildMonthReport(month, result.row.luong, result.row.tien_an, result.row.tien_no, result.row.tien_khac || 0, result.row.ten_khac || null, result.surplus, result.cumul));
+  } else {
+    await sendMessage(env, chatId, `✅ Đã ghi tiền khác: ${amount >= 0 ? '+' : ''}${formatMoney(amount)}`);
+  }
 }
 
 // ── /xoa khac ───────────────────────────────────────────────
@@ -280,12 +285,7 @@ async function handleDeleteOther(env: Env, chatId: number, text: string): Promis
   await writeField(env, month, 'other', newTotal, newName || '');
   
   // Recalc surplus
-  const updated = await getMonthRow(env, month);
-  if (updated && updated.luong > 0 && updated.tien_an > 0 && updated.tien_no > 0) {
-    const surplus = updated.luong - updated.tien_an - updated.tien_no + (updated.tien_khac || 0);
-    const cumul   = await calcCumulativeSurplus(env, month, surplus);
-    await writeSurplus(env, month, surplus, cumul);
-  }
+  await recalcSurplus(env, month);
 
   const dSign = deleted.amount >= 0 ? '+' : '';
   await sendMessage(env, chatId,
@@ -325,14 +325,11 @@ async function handleEdit(env: Env, chatId: number, userName: string, text: stri
   }
   console.log(`[EDIT] ${month} field:${field} amount:${amount} by:${userName}`);
 
-  const updated = await getMonthRow(env, month);
-  if (updated && updated.luong > 0 && updated.tien_an > 0 && updated.tien_no > 0) {
-    const surplus = updated.luong - updated.tien_an - updated.tien_no + (updated.tien_khac || 0);
-    const cumul   = await calcCumulativeSurplus(env, month, surplus);
-    await writeSurplus(env, month, surplus, cumul);
+  const result = await recalcSurplus(env, month);
+  if (result) {
     await sendMessage(env, chatId,
       `✅ Đã sửa ${fieldName} → ${formatMoney(amount)}\n\n` +
-      buildMonthReport(month, updated.luong, updated.tien_an, updated.tien_no, updated.tien_khac || 0, updated.ten_khac || null, surplus, cumul)
+      buildMonthReport(month, result.row.luong, result.row.tien_an, result.row.tien_no, result.row.tien_khac || 0, result.row.ten_khac || null, result.surplus, result.cumul)
     );
   } else {
     await sendMessage(env, chatId, `✅ Đã sửa ${fieldName} → ${formatMoney(amount)}`);
@@ -349,6 +346,30 @@ async function handleMonthReport(env: Env, chatId: number, month: string): Promi
   const surplus = row.luong - row.tien_an - row.tien_no + (row.tien_khac || 0);
   const cumul   = row.tich_luy || await calcCumulativeSurplus(env, month, surplus);
   await sendMessage(env, chatId, buildMonthReport(month, row.luong, row.tien_an, row.tien_no, row.tien_khac || 0, row.ten_khac || null, surplus, cumul));
+}
+
+// ── /gui mail ────────────────────────────────────────────────
+async function handleSendEmail(env: Env, chatId: number): Promise<void> {
+  const month = getCurrentMonthJST();
+  const row = await getMonthRow(env, month);
+  
+  if (!row || row.luong === 0 || row.tien_an === 0 || row.tien_no === 0) {
+    await sendMessage(env, chatId, '⚠️ Chưa nhập đủ dữ liệu (Lương, Ăn, Nợ) để gửi báo cáo.');
+    return;
+  }
+
+  if (row.email_da_gui) {
+    await sendMessage(env, chatId, '📧 Tháng này đã gửi email rồi. Bạn có chắc chắn muốn gửi lại không? (hiện tại tính năng gửi lại chưa hỗ trợ)');
+    // Nếu muốn cho gửi lại thì bỏ if block này
+  }
+
+  const surplus = row.luong - row.tien_an - row.tien_no + (row.tien_khac || 0);
+  await sendMonthlyEmailToWife(env, month, row.luong, row.tien_an, row.tien_no, row.tien_khac || 0, row.ten_khac || null, surplus, row.tich_luy);
+  
+  const { markEmailSent } = await import('./supabase');
+  await markEmailSent(env, month);
+  
+  await sendMessage(env, chatId, '✅ Đã gửi email báo cáo thủ công cho vợ!');
 }
 
 // ── /tích lũy ───────────────────────────────────────────────
@@ -457,8 +478,8 @@ async function handleHelp(env: Env, chatId: number): Promise<void> {
     '/sửa an 6万\n' +
     '/sửa no 4万\n' +
     '/sửa khac +1万\n' +
-    '/xoa khac       — xem & xóa tiền khác\n' +
-    '/xoa khac 1     — xóa mục số 1\n\n' +
+    '/xoa khac 1     — xóa mục tiền khác số 1\n' +
+    '/gui mail       — gửi email báo cáo ngay cho vợ\n\n' +
     '💴 CÁCH NHẬP SỐ TIỀN:\n' +
     '20万  → ¥200,000\n' +
     '1.5万 → ¥15,000\n' +

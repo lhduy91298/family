@@ -7,6 +7,7 @@
   <!-- Modern Font -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -61,25 +62,94 @@
     }
 
     header {
-      padding: 30px 24px 20px;
+      padding: 32px 24px 0;
       text-align: center;
       animation: fadeInDown 0.6s ease-out;
     }
 
     header h1 {
-      font-size: 24px;
+      font-size: 28px;
       font-weight: 700;
       letter-spacing: -0.5px;
-      background: var(--c-cumul-grad);
+      background: linear-gradient(135deg, #10b981, #06b6d4, #8b5cf6);
+      background-size: 200% 200%;
+      animation: gradientShift 4s ease infinite;
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
+    }
+
+    @keyframes gradientShift {
+      0%, 100% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
     }
 
     header p {
       font-size: 13px;
       color: var(--c-muted);
       font-weight: 500;
+    }
+
+    /* --- Cumulative Banner (compact, inline after header) --- */
+    .cumul-banner {
+      background: var(--c-cumul-grad);
+      border-radius: 14px;
+      padding: 14px 20px;
+      color: #ffffff;
+      box-shadow: 0 6px 20px -4px rgba(16, 185, 129, 0.35);
+      margin: 10px 0 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: relative;
+      overflow: hidden;
+      animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .cumul-banner::before {
+      content: '';
+      position: absolute;
+      top: -20px; right: -20px;
+      width: 80px; height: 80px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .cumul-banner .cumul-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .cumul-banner .cumul-emoji {
+      font-size: 24px;
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .cumul-banner .cumul-label {
+      font-size: 11px;
+      font-weight: 500;
+      opacity: 0.8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .cumul-banner .cumul-value {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      font-variant-numeric: tabular-nums;
+      position: relative;
+      z-index: 1;
     }
 
     .container {
@@ -94,7 +164,7 @@
       letter-spacing: 1px;
       text-transform: uppercase;
       color: var(--c-muted);
-      margin: 32px 0 12px 4px;
+      margin: 16px 0 10px 4px;
       animation: fadeIn 0.5s ease-in-out;
     }
 
@@ -238,77 +308,7 @@
       font-weight: 700;
     }
 
-    /* --- Cumulative Card --- */
-    .cumul-card {
-      background: var(--c-cumul-grad);
-      border-radius: var(--radius);
-      padding: 32px 28px;
-      color: #ffffff;
-      box-shadow: 0 10px 30px -5px rgba(16, 185, 129, 0.35);
-      margin-bottom: 24px;
-      position: relative;
-      overflow: hidden;
-      animation: slideUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .cumul-card::before {
-      content: '';
-      position: absolute;
-      top: -30px; right: -30px;
-      width: 120px; height: 120px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.08);
-    }
-
-    .cumul-card::after {
-      content: '';
-      position: absolute;
-      top: -50%; right: -50%; bottom: -50%; left: -50%;
-      background: linear-gradient(to bottom, rgba(229, 231, 235, 0), rgba(255,255,255,0.15) 50%, rgba(229, 231, 235, 0));
-      transform: rotateZ(45deg) translate(-200%, -200%);
-      animation: shine 6s infinite;
-    }
-
-    .cumul-info {
-      position: relative;
-      z-index: 1;
-    }
-
-    .cumul-card .label {
-      font-size: 13px;
-      font-weight: 500;
-      opacity: 0.85;
-      margin-bottom: 6px;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.1);
-    }
-
-    .cumul-card .value {
-      font-size: 34px;
-      font-weight: 700;
-      letter-spacing: -1px;
-      font-variant-numeric: tabular-nums;
-      text-shadow: 0 2px 4px rgba(0,0,0,0.15);
-    }
-
-    .cumul-icon {
-      position: relative;
-      z-index: 1;
-      width: 56px;
-      height: 56px;
-      border-radius: 16px;
-      background: rgba(255, 255, 255, 0.2);
-      backdrop-filter: blur(8px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 28px;
-      flex-shrink: 0;
-    }
+    /* (cumul-card styles removed — replaced by .cumul-banner in header section) */
 
     /* --- History Table --- */
     .history-wrap {
@@ -439,6 +439,36 @@
       margin-top: 20px;
     }
 
+    /* Input Form Styles */
+    .btn-edit {
+      display: block; width: 100%; padding: 12px; margin-bottom: 24px;
+      background: rgba(16, 185, 129, 0.1); color: var(--c-accent-dark);
+      border: 1px solid rgba(16, 185, 129, 0.2); border-radius: var(--radius);
+      font-family: inherit; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s ease;
+    }
+    .btn-edit:hover { background: rgba(16, 185, 129, 0.2); }
+    
+    .edit-form { padding: 20px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--c-muted); }
+    .form-group input {
+      width: 100%; padding: 10px 14px; border: 1px solid rgba(148, 163, 184, 0.3);
+      border-radius: 8px; font-family: inherit; font-size: 14px;
+      background: rgba(255, 255, 255, 0.5); color: var(--c-text);
+      transition: all 0.2s ease;
+    }
+    .form-group input:focus { outline: none; border-color: var(--c-accent); background: #fff; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1); }
+    
+    .btn-save {
+      display: block; width: 100%; padding: 14px; margin-top: 24px;
+      background: var(--c-accent); color: white; border: none; border-radius: 12px;
+      font-family: inherit; font-size: 15px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s ease;
+    }
+    .btn-save:hover { background: var(--c-accent-dark); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2); }
+    .btn-save:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
     /* Animations */
     @keyframes spin { to { transform: rotate(360deg); } }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -468,6 +498,7 @@
   <header>
     <h1>Xây Chuồng</h1>
     <p id="updated-at">Đang đồng bộ...</p>
+    <div id="cumul-banner-slot"></div>
   </header>
 
   <div class="container">

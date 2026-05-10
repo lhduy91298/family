@@ -1,6 +1,7 @@
 import { handleWebhook }       from './bot';
 import { dailySalaryCheck,
          checkIncompleteReminder,
+         autoSendEmailTask,
          sendMonthlyReport }   from './cron';
 
 export interface Env {
@@ -16,8 +17,20 @@ export interface Env {
 }
 
 export default {
-  // Nhận webhook từ Telegram
+  // Nhận webhook từ Telegram hoặc gọi API từ Dashboard
   async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    if (request.method === 'OPTIONS') {
+      const { handleApiOptions } = await import('./api');
+      return handleApiOptions(request);
+    }
+
+    if (url.pathname === '/api/update' && request.method === 'POST') {
+      const { handleApiUpdate } = await import('./api');
+      return handleApiUpdate(request, env);
+    }
+
     if (request.method !== 'POST') {
       return new Response('Family Expense Bot is running.', { status: 200 });
     }
@@ -34,7 +47,9 @@ export default {
     const cron = event.cron;
     console.log('[CRON]', cron);
 
-    if (cron === '0 15 * * *') {
+    if (cron === '0 * * * *') {
+      await autoSendEmailTask(env);
+    } else if (cron === '0 15 * * *') {
       await dailySalaryCheck(env);       // 00:00 JST mỗi ngày
       await checkIncompleteReminder(env); // Nhắc nếu chưa nhập đủ sau 3 ngày
     } else if (cron === '0 0 1 * *') {
