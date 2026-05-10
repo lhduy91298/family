@@ -4,6 +4,6 @@ compatibility_date = "2024-01-01"
 
 [triggers]
 crons = [
-  "0 5 * * *",   # 05:00 UTC = 14:00 JST — nhắc lương mỗi ngày
+  "0 15 * * *",  # 15:00 UTC = 00:00 JST — nhắc lương mỗi ngày
   "0 0 1 * *"    # 00:00 UTC ngày 1 = 09:00 JST — tổng kết tháng
 ]
