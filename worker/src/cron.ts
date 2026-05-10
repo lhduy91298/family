@@ -40,6 +40,8 @@ export async function dailySalaryCheck(env: Env): Promise<void> {
 export async function autoSendEmailTask(env: Env): Promise<void> {
   const { getUnsentCompletedMonths, markEmailSent } = await import('./supabase');
   const { sendMonthlyEmailToWife } = await import('./email');
+  const { getSalaryReminderDay, formatMonthDisplay } = await import('./parser');
+  const { sendMessage } = await import('./telegram');
   
   const rows = await getUnsentCompletedMonths(env);
   for (const row of rows) {
@@ -48,11 +50,14 @@ export async function autoSendEmailTask(env: Env): Promise<void> {
       const now = Date.now();
       const diffHours = (now - updatedAt) / (1000 * 60 * 60);
       
-      if (diffHours >= 2) {
+      const [yearStr, monthStr] = row.thang.split('-');
+      const salaryDate = getSalaryReminderDay(parseInt(yearStr), parseInt(monthStr));
+      
+      if (diffHours >= 2 && now >= salaryDate.getTime()) {
         const surplus = row.luong - row.tien_an - row.tien_no + (row.tien_khac || 0);
         await sendMonthlyEmailToWife(env, row.thang, row.luong, row.tien_an, row.tien_no, row.tien_khac || 0, row.ten_khac || null, surplus, row.tich_luy);
         await markEmailSent(env, row.thang);
-        await sendMessage(env, env.HUSBAND_ID, `🤖 Đã tự động gửi email báo cáo tháng ${formatMonthDisplay(row.thang)} cho vợ (do đã nhập xong được hơn 2 tiếng).`);
+        await sendMessage(env, env.HUSBAND_ID, `🤖 Đã tự động gửi email báo cáo tháng ${formatMonthDisplay(row.thang)} cho vợ (do đã đến ngày lương và đã nhập xong được hơn 2 tiếng).`);
       }
     }
   }
