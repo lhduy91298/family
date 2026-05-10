@@ -54,6 +54,8 @@ async function routeCommand(env: Env, chatId: number, userName: string, text: st
     await handleCumulative(env, chatId);
   } else if (lower.startsWith('/sửa ') || lower.startsWith('/sua ')) {
     await handleEdit(env, chatId, userName, text);
+  } else if (lower.startsWith('/xoa ') || lower.startsWith('/xóa ')) {
+    await handleDeleteOther(env, chatId, text);
   } else if (lower === '/nam' || lower === '/năm') {
     await handleYearReport(env, chatId);
   } else if (lower === '/so sanh' || lower === '/sosanh' || lower === '/so_sanh') {
@@ -160,6 +162,27 @@ async function handleDebt(env: Env, chatId: number, userName: string, text: stri
   await writeSurplus(env, month, surplus, cumul);
   await sendMessage(env, chatId, buildMonthReport(month, updated.luong, updated.tien_an, updated.tien_no, updated.tien_khac || 0, updated.ten_khac || null, surplus, cumul));
 
+  // Cảnh báo chi tiêu
+  if (surplus < 0) {
+    await sendMessage(env, chatId,
+      `\n⚠️ CẢNH BÁO: Tháng này ÂM ${formatMoney(Math.abs(surplus))}!\n` +
+      `Cần xem lại chi tiêu để cân đối ngân sách. 📉`
+    );
+  } else {
+    // So sánh với tháng trước
+    const lastMonth = getLastMonthJST();
+    const lastRow = await getMonthRow(env, lastMonth);
+    if (lastRow && lastRow.du_thang > 0) {
+      const diff = surplus - lastRow.du_thang;
+      const pct = Math.round(diff / lastRow.du_thang * 100);
+      if (pct < -20) {
+        await sendMessage(env, chatId,
+          `\n📉 Lưu ý: Dư giảm ${Math.abs(pct)}% so với tháng trước (${formatMoney(lastRow.du_thang)} → ${formatMoney(surplus)})`
+        );
+      }
+    }
+  }
+
   // Gửi email báo cáo cho vợ sau khi nhập đầy đủ
   await sendMonthlyEmailToWife(env, month, updated.luong, updated.tien_an, updated.tien_no, updated.tien_khac || 0, updated.ten_khac || null, surplus, cumul);
   await sendMessage(env, chatId, '📧 Đã gửi email báo cáo cho vợ!');
@@ -198,7 +221,80 @@ async function handleOther(env: Env, chatId: number, userName: string, text: str
   await sendMessage(env, chatId, buildMonthReport(month, updated.luong, updated.tien_an, updated.tien_no, updated.tien_khac || 0, updated.ten_khac || null, surplus, cumul));
 }
 
-// ── /sửa ────────────────────────────────────────────────────
+// ── /xoa khac ───────────────────────────────────────────────
+async function handleDeleteOther(env: Env, chatId: number, text: string): Promise<void> {
+  const parts = text.trim().split(/\s+/);
+  const sub = (parts[1] || '').toLowerCase();
+  
+  if (sub !== 'khac' && sub !== 'khác') {
+    await sendMessage(env, chatId, '❌ Cú pháp: /xoa khac [số thứ tự]\nVí dụ: /xoa khac 1');
+    return;
+  }
+
+  const month = getCurrentMonthJST();
+  const row   = await getMonthRow(env, month);
+  if (!row || !row.ten_khac) {
+    await sendMessage(env, chatId, '📦 Tháng này chưa có tiền khác nào.');
+    return;
+  }
+
+  // Parse entries
+  const entries = row.ten_khac.split('|').map(part => {
+    const match = part.match(/^([+-]?\d+):(.+)$/);
+    if (match) return { amount: parseInt(match[1]), name: match[2].trim(), raw: part };
+    return null;
+  }).filter(Boolean) as { amount: number; name: string; raw: string }[];
+
+  if (entries.length === 0) {
+    await sendMessage(env, chatId, '📦 Tháng này chưa có tiền khác nào.');
+    return;
+  }
+
+  const indexStr = parts[2];
+  
+  // Nếu không có số → hiện danh sách
+  if (!indexStr) {
+    let list = '📦 DANH SÁCH TIỀN KHÁC\n\n';
+    entries.forEach((e, i) => {
+      const sign = e.amount >= 0 ? '+' : '';
+      list += `${i + 1}. ${e.name}: ${sign}${formatMoney(e.amount)}\n`;
+    });
+    list += `\n🗑 Để xóa, gõ: /xoa khac [số thứ tự]\nVí dụ: /xoa khac 1`;
+    await sendMessage(env, chatId, list);
+    return;
+  }
+
+  const idx = parseInt(indexStr) - 1;
+  if (isNaN(idx) || idx < 0 || idx >= entries.length) {
+    await sendMessage(env, chatId, `❌ Số thứ tự không hợp lệ. Chọn từ 1 đến ${entries.length}.`);
+    return;
+  }
+
+  const deleted = entries[idx];
+  entries.splice(idx, 1);
+
+  // Tính lại tổng
+  const newTotal = entries.reduce((sum, e) => sum + e.amount, 0);
+  const newName  = entries.map(e => `${e.amount >= 0 ? '+' : ''}${e.amount}:${e.name}`).join('|');
+
+  await writeField(env, month, 'other', newTotal, newName || '');
+  
+  // Recalc surplus
+  const updated = await getMonthRow(env, month);
+  if (updated && updated.luong > 0 && updated.tien_an > 0 && updated.tien_no > 0) {
+    const surplus = updated.luong - updated.tien_an - updated.tien_no + (updated.tien_khac || 0);
+    const cumul   = await calcCumulativeSurplus(env, month, surplus);
+    await writeSurplus(env, month, surplus, cumul);
+  }
+
+  const dSign = deleted.amount >= 0 ? '+' : '';
+  await sendMessage(env, chatId,
+    `🗑 Đã xóa: ${deleted.name} (${dSign}${formatMoney(deleted.amount)})\n` +
+    `📦 Tổng tiền khác còn lại: ${newTotal >= 0 ? '+' : ''}${formatMoney(newTotal)}`
+  );
+}
+
+
 async function handleEdit(env: Env, chatId: number, userName: string, text: string): Promise<void> {
   const parts = text.trim().split(/\s+/);
   if (parts.length < 3) {
@@ -356,11 +452,13 @@ async function handleHelp(env: Env, chatId: number): Promise<void> {
     '/tích lũy       — tổng dư các tháng\n' +
     '/nam            — báo cáo năm hiện tại\n' +
     '/so sanh        — so sánh với tháng trước\n\n' +
-    '✏️ SỬA NẾU NHẬP SAI:\n' +
+    '✏️ SỬA / XÓA:\n' +
     '/sửa luong 21万\n' +
     '/sửa an 6万\n' +
     '/sửa no 4万\n' +
-    '/sửa khac +1万\n\n' +
+    '/sửa khac +1万\n' +
+    '/xoa khac       — xem & xóa tiền khác\n' +
+    '/xoa khac 1     — xóa mục số 1\n\n' +
     '💴 CÁCH NHẬP SỐ TIỀN:\n' +
     '20万  → ¥200,000\n' +
     '1.5万 → ¥15,000\n' +

@@ -1,5 +1,5 @@
 import { fetchAllMonths }         from './api.js';
-import { renderApp, renderChart, showError, updateTimestamp } from './ui.js';
+import { renderApp, renderChart, renderPieChart, renderTrendChart, showError, updateTimestamp } from './ui.js';
 import { getCurrentMonthJST }     from './utils.js';
 
 async function init() {
@@ -13,6 +13,8 @@ async function init() {
     renderApp(rows, currentMonth);
     console.log('renderApp done');
     renderChart(rows);
+    renderPieChart(rows, currentMonth);
+    renderTrendChart(rows);
     console.log('renderChart done');
     updateTimestamp();
     console.log('init() finished successfully');

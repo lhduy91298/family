@@ -1,5 +1,6 @@
 import { handleWebhook }       from './bot';
 import { dailySalaryCheck,
+         checkIncompleteReminder,
          sendMonthlyReport }   from './cron';
 
 export interface Env {
@@ -35,6 +36,7 @@ export default {
 
     if (cron === '0 5 * * *') {
       await dailySalaryCheck(env);       // 14:00 JST mỗi ngày
+      await checkIncompleteReminder(env); // Nhắc nếu chưa nhập đủ sau 3 ngày
     } else if (cron === '0 0 1 * *') {
       await sendMonthlyReport(env);      // 09:00 JST ngày 1
     }

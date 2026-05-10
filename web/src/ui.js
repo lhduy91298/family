@@ -12,7 +12,9 @@ export function renderApp(rows, currentMonth) {
   app.innerHTML = `
     ${renderCurrentMonth(current, currentMonth)}
     ${renderCumulative(latest)}
+    <div id="pie-section"></div>
     <div id="chart-section"></div>
+    <div id="trend-section"></div>
     ${renderHistory(rows)}
   `;
 }
@@ -84,6 +86,167 @@ export function renderChart(rows) {
           beginAtZero: true,
           grid: { color: 'rgba(148, 163, 184, 0.15)', drawBorder: false },
           ticks: { font: { family: 'Outfit' } }
+        }
+      }
+    }
+  });
+}
+
+// Biểu đồ tròn — phân bổ chi tiêu tháng hiện tại
+export function renderPieChart(rows, currentMonth) {
+  const row = rows.find(r => r.thang === currentMonth);
+  if (!row || !isComplete(row)) return;
+
+  const pieSection = document.getElementById('pie-section');
+  if (!pieSection) return;
+
+  const food  = row.tien_an || 0;
+  const debt  = row.tien_no || 0;
+  const other = Math.abs(row.tien_khac || 0);
+  const surplus = Math.max(row.du_thang || 0, 0);
+
+  pieSection.innerHTML = `
+    <p class="section-label">Phân bổ chi tiêu ${formatMonthDisplay(currentMonth).replace('tháng ', '')}</p>
+    <div class="card chart-container" style="height:260px;">
+      <canvas id="pieChart"></canvas>
+    </div>
+  `;
+
+  const ctx = document.getElementById('pieChart').getContext('2d');
+  new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Tiền ăn', 'Tiền nợ', 'Tiền khác', 'Tiền dư'],
+      datasets: [{
+        data: [food, debt, other, surplus],
+        backgroundColor: ['#f59e0b', '#ef4444', '#8b5cf6', '#10b981'],
+        borderWidth: 0,
+        borderRadius: 4,
+        spacing: 3,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '60%',
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            font: { family: 'Inter', size: 12, weight: '500' },
+            padding: 16,
+            usePointStyle: true,
+            pointStyleWidth: 10,
+          }
+        },
+        tooltip: {
+          backgroundColor: 'rgba(15, 23, 42, 0.9)',
+          titleFont: { family: 'Inter', size: 13 },
+          bodyFont: { family: 'Inter', size: 14, weight: 'bold' },
+          padding: 10,
+          cornerRadius: 8,
+          callbacks: {
+            label: function(context) {
+              const total = context.dataset.data.reduce((a, b) => a + b, 0);
+              const pct = total > 0 ? Math.round(context.parsed / total * 100) : 0;
+              return ` ${context.label}: ¥${context.parsed.toLocaleString()} (${pct}%)`;
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+// Biểu đồ xu hướng lương & dư (Line chart)
+export function renderTrendChart(rows) {
+  const chartRows = rows.filter(r => r.luong > 0).slice(0, 8).reverse();
+  if (chartRows.length < 2) return;
+
+  const trendSection = document.getElementById('trend-section');
+  if (!trendSection) return;
+
+  trendSection.innerHTML = `
+    <p class="section-label">Xu hướng lương & dư</p>
+    <div class="card chart-container" style="height:240px;">
+      <canvas id="trendChart"></canvas>
+    </div>
+  `;
+
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  const labels = chartRows.map(r => formatMonthShort(r.thang));
+
+  const gradSalary = ctx.createLinearGradient(0, 0, 0, 200);
+  gradSalary.addColorStop(0, 'rgba(59, 130, 246, 0.3)');
+  gradSalary.addColorStop(1, 'rgba(59, 130, 246, 0.02)');
+
+  const gradSurplus = ctx.createLinearGradient(0, 0, 0, 200);
+  gradSurplus.addColorStop(0, 'rgba(16, 185, 129, 0.3)');
+  gradSurplus.addColorStop(1, 'rgba(16, 185, 129, 0.02)');
+
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Lương (¥)',
+          data: chartRows.map(r => r.luong),
+          borderColor: '#3b82f6',
+          backgroundColor: gradSalary,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#3b82f6',
+          borderWidth: 2.5,
+        },
+        {
+          label: 'Dư tháng (¥)',
+          data: chartRows.map(r => r.du_thang || 0),
+          borderColor: '#10b981',
+          backgroundColor: gradSurplus,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#10b981',
+          borderWidth: 2.5,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { intersect: false, mode: 'index' },
+      plugins: {
+        legend: {
+          position: 'top',
+          align: 'end',
+          labels: {
+            font: { family: 'Inter', size: 11, weight: '500' },
+            usePointStyle: true,
+            pointStyleWidth: 8,
+            padding: 12,
+          }
+        },
+        tooltip: {
+          backgroundColor: 'rgba(15, 23, 42, 0.9)',
+          titleFont: { family: 'Inter', size: 12 },
+          bodyFont: { family: 'Inter', size: 13, weight: 'bold' },
+          padding: 10,
+          cornerRadius: 8,
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { font: { family: 'Inter', size: 11 } }
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: 'rgba(148, 163, 184, 0.12)', drawBorder: false },
+          ticks: { font: { family: 'Inter', size: 11 } }
         }
       }
     }
