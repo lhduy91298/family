@@ -328,7 +328,10 @@ function renderCurrentMonth(row, currentMonth) {
   };
 
   return `
-    <p class="section-label">${label}</p>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <p class="section-label" style="margin-bottom: 8px;">${label}</p>
+      <span onclick="toggleEditForm()" class="icon-edit-btn" title="Nhập / Sửa dữ liệu">✏️</span>
+    </div>
     <div class="card">
       <div class="row">
         <span class="row-label"><span class="icon icon-salary">💰</span>Lương</span>
@@ -349,8 +352,7 @@ function renderCurrentMonth(row, currentMonth) {
       </div>
     </div>
     
-    <button class="btn-edit" onclick="toggleEditForm()">✏️ Nhập / Sửa Dữ Liệu</button>
-    <div id="edit-form" class="card edit-form" style="display: none;">
+    <div id="edit-form" class="card edit-form" style="display: none; margin-top: 16px;">
       <div class="form-group">
         <label>💰 Lương (¥)</label>
         <input type="number" id="input-salary" placeholder="VD: 200000" value="${row?.luong || ''}">
@@ -364,12 +366,17 @@ function renderCurrentMonth(row, currentMonth) {
         <input type="number" id="input-debt" placeholder="VD: 30000" value="${row?.tien_no || ''}">
       </div>
       <div class="form-group">
-        <label>📦 Tiền khác (¥)</label>
-        <div style="display: flex; gap: 8px;">
-          <input type="number" id="input-other-amount" placeholder="VD: -20000" style="flex: 1;">
-          <input type="text" id="input-other-name" placeholder="Ghi chú (Mua quà)" style="flex: 2;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <label style="margin-bottom: 0;">📦 Tiền khác (¥)</label>
+          <span onclick="addOtherInput()" style="cursor: pointer; color: var(--c-accent); font-weight: bold; font-size: 18px;" title="Thêm mục mới">+</span>
         </div>
-        <small style="color:var(--c-muted); margin-top:4px; display:block;">Nhập âm (-) nếu là chi, dương nếu là thu thêm.</small>
+        <div id="other-inputs-container">
+          <div class="other-input-row" style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <input type="number" class="other-amt" placeholder="VD: -20000" style="flex: 1;">
+            <input type="text" class="other-name" placeholder="Ghi chú (Mua quà)" style="flex: 2;">
+          </div>
+        </div>
+        <small style="color:var(--c-muted); display:block;">Nhập âm (-) nếu là chi, dương nếu là thu thêm.</small>
       </div>
       <button class="btn-save" onclick="saveData()" id="btn-save">💾 Lưu Thay Đổi</button>
       <div id="save-status" style="margin-top: 10px; font-size: 13px; font-weight: 500; text-align: center;"></div>

@@ -41,6 +41,24 @@ window.toggleEditForm = function() {
   }
 };
 
+window.addOtherInput = function() {
+  const container = document.getElementById('other-inputs-container');
+  if (!container) return;
+  
+  const div = document.createElement('div');
+  div.className = 'other-input-row';
+  div.style.display = 'flex';
+  div.style.gap = '8px';
+  div.style.marginBottom = '8px';
+  
+  div.innerHTML = `
+    <input type="number" class="other-amt" placeholder="VD: -20000" style="flex: 1;">
+    <input type="text" class="other-name" placeholder="Ghi chú (Mua quà)" style="flex: 2;">
+    <span onclick="this.parentElement.remove()" style="cursor: pointer; color: var(--c-red); font-weight: bold; font-size: 18px; line-height: 38px;" title="Xóa mục này">×</span>
+  `;
+  container.appendChild(div);
+};
+
 window.saveData = async function() {
   const btn = document.getElementById('btn-save');
   const status = document.getElementById('save-status');
@@ -51,8 +69,6 @@ window.saveData = async function() {
   const salary = document.getElementById('input-salary').value;
   const food = document.getElementById('input-food').value;
   const debt = document.getElementById('input-debt').value;
-  const otherAmt = document.getElementById('input-other-amount').value;
-  const otherName = document.getElementById('input-other-name').value;
 
   const url = 'https://family-expense-bot.lhduy91298.workers.dev/api/update';
 
@@ -61,7 +77,15 @@ window.saveData = async function() {
     if (salary) updates.push({ field: 'salary', amount: Number(salary) });
     if (food) updates.push({ field: 'food', amount: Number(food) });
     if (debt) updates.push({ field: 'debt', amount: Number(debt) });
-    if (otherAmt) updates.push({ field: 'other', amount: Number(otherAmt), name: otherName });
+
+    const otherRows = document.querySelectorAll('.other-input-row');
+    otherRows.forEach(row => {
+      const amtInput = row.querySelector('.other-amt');
+      const nameInput = row.querySelector('.other-name');
+      if (amtInput && amtInput.value) {
+        updates.push({ field: 'other', amount: Number(amtInput.value), name: nameInput ? nameInput.value : '' });
+      }
+    });
 
     for (const data of updates) {
       const res = await fetch(url, {
