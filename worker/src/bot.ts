@@ -46,38 +46,44 @@ export async function handleWebhook(request: Request, env: Env): Promise<void> {
 async function routeCommand(env: Env, chatId: number, userName: string, text: string): Promise<void> {
   const lower = text.toLowerCase().trim();
 
-  if (lower.startsWith('/luong ') || lower.startsWith('/lương ')) {
+  if (lower.startsWith('/luong ')) {
     await handleSalary(env, chatId, userName, text);
-  } else if (lower.startsWith('/an ') || lower.startsWith('/ăn ')) {
+  } else if (lower.startsWith('/an ')) {
     await handleFood(env, chatId, userName, text);
-  } else if (lower.startsWith('/no ') || lower.startsWith('/nợ ')) {
+  } else if (lower.startsWith('/no ')) {
     await handleDebt(env, chatId, userName, text);
-  } else if (lower.startsWith('/khac ') || lower.startsWith('/khác ')) {
+  } else if (lower.startsWith('/khac ')) {
     await handleOther(env, chatId, userName, text);
-  } else if (lower === '/tháng' || lower === '/thang') {
+  } else if (lower === '/thang') {
     await handleMonthReport(env, chatId, getCurrentMonthJST());
-  } else if (lower.startsWith('/tháng ') || lower.startsWith('/thang ')) {
+  } else if (lower.startsWith('/thang ')) {
     const parts = text.trim().split(/\s+/);
     const m = (parts[1] && /^\d{4}-\d{2}$/.test(parts[1])) ? parts[1] : getCurrentMonthJST();
     await handleMonthReport(env, chatId, m);
-  } else if (lower === '/tích lũy' || lower === '/tich luy' || lower === '/tichluy') {
+  } else if (lower === '/tichluy') {
     await handleCumulative(env, chatId);
-  } else if (lower.startsWith('/sửa ') || lower.startsWith('/sua ')) {
-    await handleEdit(env, chatId, userName, text);
-  } else if (lower.startsWith('/xoa ') || lower.startsWith('/xóa ')) {
+  } else if (lower.startsWith('/sualuong ')) {
+    await handleEdit(env, chatId, userName, 'luong', text);
+  } else if (lower.startsWith('/suaan ')) {
+    await handleEdit(env, chatId, userName, 'an', text);
+  } else if (lower.startsWith('/suano ')) {
+    await handleEdit(env, chatId, userName, 'no', text);
+  } else if (lower.startsWith('/suakhac ')) {
+    await handleEdit(env, chatId, userName, 'khac', text);
+  } else if (lower.startsWith('/xoakhac ') || lower === '/xoakhac') {
     await handleDeleteOther(env, chatId, text);
-  } else if (lower === '/nam' || lower === '/năm') {
+  } else if (lower === '/nam') {
     await handleYearReport(env, chatId);
-  } else if (lower === '/so sanh' || lower === '/sosanh' || lower === '/so_sanh') {
+  } else if (lower === '/sosanh') {
     await handleCompare(env, chatId);
-  } else if (lower === '/gui mail' || lower === '/gửi mail') {
+  } else if (lower === '/guimail') {
     await handleSendEmail(env, chatId);
   } else if (lower === '/web' || lower === '/link' || lower === '/dashboard') {
     await handleWeb(env, chatId);
-  } else if (lower === '/giúp đỡ' || lower === '/giupdo' || lower === '/start' || lower === '/help') {
+  } else if (lower === '/giupdo' || lower === '/start' || lower === '/help') {
     await handleHelp(env, chatId);
   } else {
-    await sendMessage(env, chatId, '❓ Không hiểu lệnh này.\nGõ /giúp đỡ để xem hướng dẫn.');
+    await sendMessage(env, chatId, '❓ Không hiểu lệnh này.\nGõ /giupdo để xem hướng dẫn.');
   }
 }
 
@@ -228,15 +234,11 @@ async function handleOther(env: Env, chatId: number, userName: string, text: str
   }
 }
 
-// ── /xoa khac ───────────────────────────────────────────────
+// ── /xoakhac ───────────────────────────────────────────────
 async function handleDeleteOther(env: Env, chatId: number, text: string): Promise<void> {
   const parts = text.trim().split(/\s+/);
-  const sub = (parts[1] || '').toLowerCase();
-  
-  if (sub !== 'khac' && sub !== 'khác') {
-    await sendMessage(env, chatId, '❌ Cú pháp: /xoa khac [số thứ tự]\nVí dụ: /xoa khac 1');
-    return;
-  }
+  // parts[0] is '/xoakhac', parts[1] is the index
+
 
   const month = getCurrentMonthJST();
   const row   = await getMonthRow(env, month);
@@ -266,7 +268,7 @@ async function handleDeleteOther(env: Env, chatId: number, text: string): Promis
       const sign = e.amount >= 0 ? '+' : '';
       list += `${i + 1}. ${e.name}: ${sign}${formatMoney(e.amount)}\n`;
     });
-    list += `\n🗑 Để xóa, gõ: /xoa khac [số thứ tự]\nVí dụ: /xoa khac 1`;
+    list += `\n🗑 Để xóa, gõ: /xoakhac [số thứ tự]\nVí dụ: /xoakhac 1`;
     await sendMessage(env, chatId, list);
     return;
   }
@@ -297,14 +299,13 @@ async function handleDeleteOther(env: Env, chatId: number, text: string): Promis
 }
 
 
-async function handleEdit(env: Env, chatId: number, userName: string, text: string): Promise<void> {
+async function handleEdit(env: Env, chatId: number, userName: string, field: string, text: string): Promise<void> {
   const parts = text.trim().split(/\s+/);
-  if (parts.length < 3) {
-    await sendMessage(env, chatId, '❌ Cú pháp:\n/sửa luong 21万\n/sửa an 6万\n/sửa no 4万');
+  if (parts.length < 2) {
+    await sendMessage(env, chatId, '❌ Cú pháp:\n/sualuong 21万\n/suaan 6万\n/suano 4万\n/suakhac +1万 Thưởng');
     return;
   }
-  const field  = parts[1].toLowerCase();
-  const amount = parseAmount(parts[2]);
+  const amount = parseAmount(parts[1]);
   if (!amount) {
     await sendMessage(env, chatId, '❌ Số tiền không hợp lệ.');
     return;
@@ -312,14 +313,15 @@ async function handleEdit(env: Env, chatId: number, userName: string, text: stri
   const month = getCurrentMonthJST();
   let fieldName = '';
 
-  if (field === 'luong' || field === 'lương') {
+  if (field === 'luong') {
     await writeField(env, month, 'salary', amount); fieldName = 'Lương';
-  } else if (field === 'an' || field === 'ăn') {
+  } else if (field === 'an') {
     await writeField(env, month, 'food', amount);   fieldName = 'Tiền ăn';
-  } else if (field === 'no' || field === 'nợ') {
+  } else if (field === 'no') {
     await writeField(env, month, 'debt', amount);   fieldName = 'Tiền nợ';
-  } else if (field === 'khac' || field === 'khác') {
-    const { name } = parseOtherCommand(text);
+  } else if (field === 'khac') {
+    const partsWithoutCmd = parts.slice(1).join(' '); // Re-join to parse amount and name
+    const { name } = parseOtherCommand('/khac ' + partsWithoutCmd); // Trick parseOtherCommand by prepending /khac
     await writeField(env, month, 'other', amount, name); fieldName = 'Tiền khác';
   } else {
     await sendMessage(env, chatId, '❌ Chỉ sửa được: luong, an, no, khac');
@@ -469,7 +471,7 @@ async function handleCompare(env: Env, chatId: number): Promise<void> {
   await sendMessage(env, chatId, reply);
 }
 
-// ── /giúp đỡ ────────────────────────────────────────────────
+// ── /giupdo ────────────────────────────────────────────────
 async function handleHelp(env: Env, chatId: number): Promise<void> {
   const help =
     '💡 HƯỚNG DẪN SỬ DỤNG\n\n' +
@@ -479,19 +481,19 @@ async function handleHelp(env: Env, chatId: number): Promise<void> {
     '3️⃣ /no 3万      — nhập tiền nợ\n' +
     '4️⃣ /khac -2万 Mua quà (Tuỳ chọn)\n\n' +
     '📊 XEM BÁO CÁO:\n' +
-    '/tháng          — báo cáo tháng này\n' +
-    '/tháng 2024-01  — báo cáo tháng cụ thể\n' +
-    '/tích lũy       — tổng dư các tháng\n' +
+    '/thang          — báo cáo tháng này\n' +
+    '/thang 2024-01  — báo cáo tháng cụ thể\n' +
+    '/tichluy       — tổng dư các tháng\n' +
     '/nam            — báo cáo năm hiện tại\n' +
-    '/so sanh        — so sánh với tháng trước\n\n' +
+    '/sosanh        — so sánh với tháng trước\n\n' +
     '✏️ SỬA / XÓA:\n' +
-    '/sửa luong 21万\n' +
-    '/sửa an 6万\n' +
-    '/sửa no 4万\n' +
-    '/sửa khac +1万\n' +
-    '/xoa khac 1     — xóa mục tiền khác số 1\n' +
+    '/sualuong 21万\n' +
+    '/suaan 6万\n' +
+    '/suano 4万\n' +
+    '/suakhac +1万\n' +
+    '/xoakhac 1     — xóa mục tiền khác số 1\n' +
     '/web            — lấy link xem web dashboard\n' +
-    '/gui mail       — gửi email báo cáo ngay cho vợ\n\n' +
+    '/guimail       — gửi email báo cáo ngay cho vợ\n\n' +
     '💴 CÁCH NHẬP SỐ TIỀN:\n' +
     '20万  → ¥200,000\n' +
     '1.5万 → ¥15,000\n' +
