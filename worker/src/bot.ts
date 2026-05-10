@@ -72,6 +72,8 @@ async function routeCommand(env: Env, chatId: number, userName: string, text: st
     await handleCompare(env, chatId);
   } else if (lower === '/gui mail' || lower === '/gửi mail') {
     await handleSendEmail(env, chatId);
+  } else if (lower === '/web' || lower === '/link' || lower === '/dashboard') {
+    await handleWeb(env, chatId);
   } else if (lower === '/giúp đỡ' || lower === '/giupdo' || lower === '/start' || lower === '/help') {
     await handleHelp(env, chatId);
   } else {
@@ -372,6 +374,15 @@ async function handleSendEmail(env: Env, chatId: number): Promise<void> {
   await sendMessage(env, chatId, '✅ Đã gửi email báo cáo thủ công cho vợ!');
 }
 
+// ── /web ───────────────────────────────────────────────────
+async function handleWeb(env: Env, chatId: number): Promise<void> {
+  await sendMessage(env, chatId, 
+    '🌐 **WEB DASHBOARD**\n\n' +
+    'Truy cập link bên dưới để xem biểu đồ và nhập dữ liệu:\n' +
+    '👉 https://family-expense-dashboard.pages.dev/'
+  );
+}
+
 // ── /tích lũy ───────────────────────────────────────────────
 async function handleCumulative(env: Env, chatId: number): Promise<void> {
   const rows = await getAllMonthRows(env);
@@ -479,6 +490,7 @@ async function handleHelp(env: Env, chatId: number): Promise<void> {
     '/sửa no 4万\n' +
     '/sửa khac +1万\n' +
     '/xoa khac 1     — xóa mục tiền khác số 1\n' +
+    '/web            — lấy link xem web dashboard\n' +
     '/gui mail       — gửi email báo cáo ngay cho vợ\n\n' +
     '💴 CÁCH NHẬP SỐ TIỀN:\n' +
     '20万  → ¥200,000\n' +
