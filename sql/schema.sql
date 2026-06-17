@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS theo_doi (
   tien_no         INTEGER     NOT NULL DEFAULT 0, -- Tiền nợ (¥)
   tien_khac       INTEGER     NOT NULL DEFAULT 0, -- Tiền khác (¥), thu/chi tuỳ dấu
   ten_khac        TEXT,                           -- Ghi chú tiền khác
+  chi_tiet_an     TEXT,                           -- Ghi chú chi tiết tiền ăn (vd: 5000:Siêu thị|2000:Ăn ngoài)
   du_thang        INTEGER     NOT NULL DEFAULT 0, -- luong - tien_an - tien_no + tien_khac
   tich_luy        INTEGER     NOT NULL DEFAULT 0, -- Cộng dồn tất cả tháng
   nhap_luong_luc  TIMESTAMPTZ,                    -- Thời điểm nhập lương (JST)

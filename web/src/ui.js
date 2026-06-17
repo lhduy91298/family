@@ -272,18 +272,59 @@ function renderCurrentMonth(row, currentMonth) {
   const label = formatMonthDisplay(currentMonth);
   const complete = row && isComplete(row);
 
-  const val = (amount, field) => {
-    if (!row || row[field] === 0) {
-      return `<span class="pending tag-incomplete">chưa nhập</span>`;
-    }
-    return `<span class="row-value">${formatMoney(amount)}</span>`;
-  };
+    const val = (amount, field) => {
+      if (!row || row[field] === 0 || row[field] === undefined) {
+        return `<span class="pending tag-incomplete">chưa nhập</span>`;
+      }
+      return `<span class="row-value">${formatMoney(amount)}</span>`;
+    };
 
   const surplusVal = () => {
     if (!complete) return `<span class="pending tag-incomplete">—</span>`;
     const s = row.du_thang;
     const cls = s >= 0 ? 'surplus' : 'deficit';
     return `<span class="row-value ${cls}">${formatMoney(s)}</span>`;
+  };
+
+  const foodRow = () => {
+    if (!row || row.tien_an === 0 || row.tien_an === undefined) {
+      return `
+        <div class="row">
+          <span class="row-label"><span class="icon icon-food">🍜</span>Tiền ăn</span>
+          <span class="pending tag-incomplete">—</span>
+        </div>
+      `;
+    }
+
+    let detailHtml = '';
+    if (row.chi_tiet_an) {
+      const entries = parseOtherEntries(row.chi_tiet_an);
+      if (entries.length > 0) {
+        const items = entries.map((e, idx) => {
+          return `
+            <div class="other-detail-item">
+              <span>${e.name}</span>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="deficit">${formatMoney(Math.abs(e.amount))}</span>
+                <span class="delete-other-btn" onclick="event.stopPropagation(); window.deleteFoodEntry(${idx})" style="cursor: pointer; color: var(--c-red); font-size: 14px; font-weight: bold;" title="Xóa mục này">×</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+        detailHtml = `<div class="other-detail" id="food-detail">${items}</div>`;
+      }
+    }
+
+    const hasDetail = detailHtml !== '';
+    const chevron = hasDetail ? '<span class="chevron" id="food-chevron">▾</span>' : '';
+
+    return `
+      <div class="row row-clickable" ${hasDetail ? 'onclick="toggleFoodDetail()"' : ''}>
+        <span class="row-label"><span class="icon icon-food">🍜</span>Tiền ăn ${chevron}</span>
+        <span class="row-value deficit">${formatMoney(row.tien_an)}</span>
+      </div>
+      ${detailHtml}
+    `;
   };
 
   const otherRow = () => {
@@ -302,12 +343,15 @@ function renderCurrentMonth(row, currentMonth) {
     if (row.ten_khac) {
       const entries = parseOtherEntries(row.ten_khac);
       if (entries.length > 0) {
-        const items = entries.map(e => {
+        const items = entries.map((e, idx) => {
           const cls = e.amount >= 0 ? 'surplus' : 'deficit';
           return `
             <div class="other-detail-item">
               <span>${e.name}</span>
-              <span class="${cls}">${formatMoney(e.amount)}</span>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="${cls}">${formatMoney(e.amount)}</span>
+                <span class="delete-other-btn" onclick="event.stopPropagation(); window.deleteOtherEntry(${idx})" style="cursor: pointer; color: var(--c-red); font-size: 14px; font-weight: bold;" title="Xóa mục này">×</span>
+              </div>
             </div>
           `;
         }).join('');
@@ -337,10 +381,7 @@ function renderCurrentMonth(row, currentMonth) {
         <span class="row-label"><span class="icon icon-salary">💰</span>Lương</span>
         ${val(row?.luong, 'luong')}
       </div>
-      <div class="row">
-        <span class="row-label"><span class="icon icon-food">🍜</span>Tiền ăn</span>
-        ${val(row?.tien_an, 'tien_an')}
-      </div>
+      ${foodRow()}
       <div class="row">
         <span class="row-label"><span class="icon icon-debt">💳</span>Tiền nợ</span>
         ${val(row?.tien_no, 'tien_no')}
@@ -358,8 +399,20 @@ function renderCurrentMonth(row, currentMonth) {
         <input type="number" id="input-salary" placeholder="VD: 200000" value="${row?.luong || ''}">
       </div>
       <div class="form-group">
-        <label>🍜 Tiền ăn (¥)</label>
+        <label>🍜 Ngân sách tiền ăn (¥)</label>
         <input type="number" id="input-food" placeholder="VD: 50000" value="${row?.tien_an || ''}">
+      </div>
+      <div class="form-group">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <label style="margin-bottom: 0;">🛒 Chi tiết đi chợ/siêu thị (¥)</label>
+          <span onclick="addFoodInput()" style="cursor: pointer; color: var(--c-accent); font-weight: bold; font-size: 18px;" title="Thêm mục mới">+</span>
+        </div>
+        <div id="food-inputs-container">
+          <div class="food-input-row" style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <input type="number" class="food-amt" placeholder="VD: 5000" style="flex: 1;">
+            <input type="text" class="food-name" placeholder="Ghi chú (Siêu thị)" style="flex: 2;">
+          </div>
+        </div>
       </div>
       <div class="form-group">
         <label>💳 Tiền nợ (¥)</label>

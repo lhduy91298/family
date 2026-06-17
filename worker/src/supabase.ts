@@ -7,14 +7,18 @@ export interface MonthRow {
   luong:          number;
   tien_an:        number;
   tien_no:        number;
-  tien_khac:      number;
-  ten_khac:       string | null;
+  tien_khac       : number;
+  ten_khac        : string | null;
+  chi_tiet_an     ?: string | null;
   du_thang:       number;
   tich_luy:       number;
   nhap_luong_luc: string | null;
   nhap_an_luc:    string | null;
   nhap_no_luc:    string | null;
   nhap_khac_luc:  string | null;
+  email_da_gui?:  boolean;
+  cap_nhat_luc?:  string | null;
+  bang_luong_file_id?: string | null;
 }
 
 function headers(env: Env) {
@@ -100,8 +104,9 @@ export async function writeField(
     [atMap[field]]:  nowISO,
     cap_nhat_luc:    nowISO,
   };
-  if (field === 'salary' && extraStr) body.ngay_luong = extraStr;
-  if (field === 'other' && extraStr) body.ten_khac = extraStr;
+  if (field === 'salary' && extraStr !== undefined) body.ngay_luong = extraStr;
+  if (field === 'other' && extraStr !== undefined) body.ten_khac = extraStr;
+  if (field === 'food' && extraStr !== undefined) body.chi_tiet_an = extraStr;
 
   await supabasePost(env, '/theo_doi', body, 'resolution=merge-duplicates,return=representation');
   console.log(`[WRITE] month:${month} field:${field} value:${value}`);
@@ -128,7 +133,8 @@ export async function calcCumulativeSurplus(env: Env, currentMonth: string, curr
 // Tạo chuỗi báo cáo tháng
 export function buildMonthReport(
   month: string, salary: number, food: number,
-  debt: number, other: number, otherName: string | null, surplus: number, cumulative: number
+  debt: number, other: number, otherName: string | null, surplus: number, cumulative: number,
+  chiTietAn?: string | null
 ): string {
   const sign = surplus >= 0 ? '+' : '';
   let otherStr = '';
@@ -138,10 +144,21 @@ export function buildMonthReport(
     otherStr = `🏷 Khác${oName}: ${oSign}${formatMoney(Math.abs(other))}\n`;
   }
 
+  let foodStr = `🍱 Tiền ăn:  -${formatMoney(food)}\n`;
+  if (chiTietAn) {
+    const items = chiTietAn.split('|');
+    for (const item of items) {
+      const match = item.match(/^([+-]?\d+):(.+)$/);
+      if (match) {
+        foodStr += `   - ${match[2]}: ${formatMoney(Math.abs(parseInt(match[1])))}\n`;
+      }
+    }
+  }
+
   return (
     `📊 BÁO CÁO ${formatMonthDisplay(month).toUpperCase()}\n\n` +
     `💴 Lương:    +${formatMoney(salary)}\n` +
-    `🍱 Tiền ăn:  -${formatMoney(food)}\n` +
+    foodStr +
     `💳 Tiền nợ:  -${formatMoney(debt)}\n` +
     otherStr +
     `─────────────────\n` +
@@ -150,4 +167,28 @@ export function buildMonthReport(
       : `⚠️ Âm tháng này:  -${formatMoney(Math.abs(surplus))}\n`) +
     `💎 Tổng tích lũy: +${formatMoney(cumulative)}`
   );
+}
+
+// Lấy các tháng chưa gửi email nhưng đã nhập đủ (lương, ăn, nợ > 0)
+export async function getUnsentCompletedMonths(env: Env): Promise<MonthRow[]> {
+  const rows = await supabaseGet(env, '/theo_doi?or=(email_da_gui.is.null,email_da_gui.eq.false)&luong=gt.0&tien_an=gt.0&tien_no=gt.0');
+  return (rows || []) as MonthRow[];
+}
+
+// Đánh dấu đã gửi email
+export async function markEmailSent(env: Env, month: string): Promise<void> {
+  await supabasePatch(env, `/theo_doi?thang=eq.${month}`, {
+    email_da_gui: true
+  });
+  console.log(`[EMAIL] Marked ${month} as sent in DB.`);
+}
+
+// Lưu file_id bảng lương từ Telegram vào DB
+export async function savePayslipFileId(env: Env, month: string, fileId: string): Promise<void> {
+  await supabasePost(env, '/theo_doi', {
+    thang: month,
+    bang_luong_file_id: fileId,
+    cap_nhat_luc: new Date().toISOString(),
+  }, 'resolution=merge-duplicates,return=representation');
+  console.log(`[PAYSLIP] Saved file_id for ${month}`);
 }

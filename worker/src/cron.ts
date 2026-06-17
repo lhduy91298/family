@@ -5,18 +5,18 @@ import {
   calcCumulativeSurplus, buildMonthReport,
 } from './supabase';
 import {
-  getCurrentMonthJST, getLastMonthJST,
+  getCurrentMonthJST, getLastMonthJST, getNextMonthJST,
   formatMonthDisplay, isTodaySalaryReminderDay,
-  getSalaryReminderDay
+  getSalaryReminderDay, getSalaryPaymentDay
 } from './parser';
 
-// Chạy mỗi ngày 14:00 JST (05:00 UTC)
+// Chạy mỗi ngày 00:00 JST (15:00 UTC)
 export async function dailySalaryCheck(env: Env): Promise<void> {
   if (!isTodaySalaryReminderDay()) {
     console.log('[SALARY_CHECK] Hom nay khong phai ngay nhac luong.');
     return;
   }
-  const month = getCurrentMonthJST();
+  const month = getNextMonthJST();
   const row   = await getMonthRow(env, month);
   if (row && row.luong > 0) {
     console.log('[SALARY_CHECK] Da co luong, bo qua.');
@@ -24,13 +24,18 @@ export async function dailySalaryCheck(env: Env): Promise<void> {
   }
 
   const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const dow15  = new Date(Date.UTC(nowJST.getUTCFullYear(), nowJST.getUTCMonth(), 15)).getUTCDay();
+  const y = nowJST.getUTCFullYear();
+  const m = nowJST.getUTCMonth() + 1;
+  const payDay = getSalaryPaymentDay(y, m);
+  const payJST = new Date(payDay.getTime() + 9 * 60 * 60 * 1000);
+  const payDate = payJST.getUTCDate();
+  const dow15  = new Date(Date.UTC(y, m - 1, 15)).getUTCDay();
   const note   = (dow15 === 6 || dow15 === 0)
-    ? '\n(Ngày 15 là cuối tuần nên nhắc sớm hôm nay)' : '';
+    ? `\n(Ngày 15 là cuối tuần nên lương chuyển ngày ${payDate})` : '';
 
   await sendMessage(env, env.HUSBAND_ID,
-    `🔔 Hôm nay là ngày nhận lương! ${note}\n\n` +
-    `Nhập nhanh qua web: https://family-expense-dashboard.pages.dev/\n` +
+    `🔔 Ngày mai (${payDate}/${m}) là ngày nhận lương! ${note}\n\n` +
+    `Nhập nhanh qua web: https://xay-chuong.pages.dev/\n` +
     `Hoặc gõ /luong [số tiền] để ghi nhận ngay!`
   );
   console.log('[SALARY_CHECK] Da gui nhac luong', month);
@@ -40,7 +45,7 @@ export async function dailySalaryCheck(env: Env): Promise<void> {
 export async function autoSendEmailTask(env: Env): Promise<void> {
   const { getUnsentCompletedMonths, markEmailSent } = await import('./supabase');
   const { sendMonthlyEmailToWife } = await import('./email');
-  const { getSalaryReminderDay, formatMonthDisplay } = await import('./parser');
+  const { getSalaryPaymentDay, formatMonthDisplay } = await import('./parser');
   const { sendMessage } = await import('./telegram');
   
   const rows = await getUnsentCompletedMonths(env);
@@ -51,13 +56,21 @@ export async function autoSendEmailTask(env: Env): Promise<void> {
       const diffHours = (now - updatedAt) / (1000 * 60 * 60);
       
       const [yearStr, monthStr] = row.thang.split('-');
-      const salaryDate = getSalaryReminderDay(parseInt(yearStr), parseInt(monthStr));
+      const paymentDate = getSalaryPaymentDay(parseInt(yearStr), parseInt(monthStr));
       
-      if (diffHours >= 2 && now >= salaryDate.getTime()) {
+      if (diffHours >= 2 && now >= paymentDate.getTime()) {
         const surplus = row.luong - row.tien_an - row.tien_no + (row.tien_khac || 0);
-        await sendMonthlyEmailToWife(env, row.thang, row.luong, row.tien_an, row.tien_no, row.tien_khac || 0, row.ten_khac || null, surplus, row.tich_luy);
-        await markEmailSent(env, row.thang);
-        await sendMessage(env, env.HUSBAND_ID, `🤖 Đã tự động gửi email báo cáo tháng ${formatMonthDisplay(row.thang)} cho vợ (do đã đến ngày lương và đã nhập xong được hơn 2 tiếng).`);
+        const success = await sendMonthlyEmailToWife(env, row.thang, row.luong, row.tien_an, row.tien_no, row.tien_khac || 0, row.ten_khac || null, surplus, row.tich_luy, row.bang_luong_file_id);
+        
+        if (success) {
+          const { buildMonthReport } = await import('./supabase');
+          await markEmailSent(env, row.thang);
+          const reportText = buildMonthReport(row.thang, row.luong, row.tien_an, row.tien_no, row.tien_khac || 0, row.ten_khac || null, surplus, row.tich_luy);
+          const attachNote = row.bang_luong_file_id ? '\n📎 Đã đính kèm file bảng lương PDF.' : '';
+          await sendMessage(env, env.HUSBAND_ID, `🤖 Đã tự động gửi email báo cáo tháng ${formatMonthDisplay(row.thang)} cho vợ (${env.WIFE_EMAIL})!${attachNote}\n\nNội dung đã gửi:\n${reportText}`);
+        } else {
+          await sendMessage(env, env.HUSBAND_ID, `❌ Tự động gửi email báo cáo tháng ${formatMonthDisplay(row.thang)} thất bại! Có thể do lỗi cấu hình AppScript Webhook hoặc email người nhận không hợp lệ.`);
+        }
       }
     }
   }
@@ -97,7 +110,23 @@ export async function checkIncompleteReminder(env: Env): Promise<void> {
   console.log('[INCOMPLETE_REMINDER] Da gui nhac', month, missing);
 }
 
-// Chạy ngày 1 mỗi tháng 09:00 JST (00:00 UTC)
+// Kiểm tra và gửi báo cáo tổng kết tháng nếu hôm nay là ngày lãnh lương
+export async function checkAndSendMonthlyReport(env: Env): Promise<void> {
+  const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const y = nowJST.getUTCFullYear();
+  const m = nowJST.getUTCMonth() + 1;
+  const todayDay = nowJST.getUTCDate();
+  
+  const payDay = getSalaryPaymentDay(y, m);
+  const payDayJST = new Date(payDay.getTime() + 9 * 60 * 60 * 1000);
+  
+  if (todayDay === payDayJST.getUTCDate()) {
+    console.log('[MONTHLY] Hom nay la ngay nhan luong, gui tong ket thang truoc.');
+    await sendMonthlyReport(env);
+  }
+}
+
+// Chạy tổng kết tháng
 export async function sendMonthlyReport(env: Env): Promise<void> {
   const lastMonth = getLastMonthJST();
   const row       = await getMonthRow(env, lastMonth);

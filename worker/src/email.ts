@@ -1,7 +1,18 @@
 import { Env } from './index';
 import { formatMoney, formatMonthDisplay } from './parser';
+import { getFilePath, downloadTelegramFile } from './telegram';
 
-const DASHBOARD_URL = 'https://family-expense-dashboard.pages.dev';
+const DASHBOARD_URL = 'https://xay-chuong.pages.dev';
+
+// Helper: ArrayBuffer → Base64 (Cloudflare Workers compatible)
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
 
 export async function sendMonthlyEmailToWife(
   env: Env,
@@ -13,10 +24,11 @@ export async function sendMonthlyEmailToWife(
   tenKhac: string | null,
   surplus: number,
   cumul: number,
-): Promise<void> {
-  if (!env.RESEND_API_KEY || !env.WIFE_EMAIL) {
-    console.log('[EMAIL] Missing RESEND_API_KEY or WIFE_EMAIL, skipping.');
-    return;
+  payslipFileId?: string | null,
+): Promise<boolean> {
+  if (!env.APPSCRIPT_WEBHOOK_URL || !env.WIFE_EMAIL) {
+    console.log('[EMAIL] Missing APPSCRIPT_WEBHOOK_URL or WIFE_EMAIL, skipping.');
+    return false;
   }
 
   const monthLabel = formatMonthDisplay(month);
@@ -89,28 +101,52 @@ export async function sendMonthlyEmailToWife(
 </body>
 </html>`;
 
+  // Chuẩn bị payload gửi sang AppScript
+  const payload: Record<string, any> = {
+    to: env.WIFE_EMAIL,
+    subject: `🏠 Báo cáo chi tiêu ${monthLabel} — Dư: ${surplusSign}${formatMoney(surplus)}`,
+    html: html,
+  };
+
+  // Nếu có file bảng lương PDF, tải về và đính kèm dạng Base64
+  if (payslipFileId) {
+    try {
+      const filePath = await getFilePath(env, payslipFileId);
+      if (filePath) {
+        const fileBuffer = await downloadTelegramFile(env, filePath);
+        if (fileBuffer) {
+          const [y, m] = month.split('-');
+          payload.attachmentBase64 = arrayBufferToBase64(fileBuffer);
+          payload.attachmentName = `Bang_luong_${m}_${y}.pdf`;
+          console.log(`[EMAIL] Attached payslip PDF for ${month} (${fileBuffer.byteLength} bytes)`);
+        }
+      }
+    } catch (err) {
+      console.error('[EMAIL] Error downloading payslip PDF, sending without attachment:', err);
+      // Vẫn gửi email bình thường, chỉ không có file đính kèm
+    }
+  }
+
   try {
-    const res = await fetch('https://api.resend.com/emails', {
+    const res = await fetch(env.APPSCRIPT_WEBHOOK_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${env.RESEND_API_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        from: 'Xây Chuồng <onboarding@resend.dev>',
-        to: [env.WIFE_EMAIL],
-        subject: `🏠 Báo cáo chi tiêu ${monthLabel} — Dư: ${surplusSign}${formatMoney(surplus)}`,
-        html: html,
-      }),
+      body: JSON.stringify(payload),
     });
 
-    if (res.ok) {
-      console.log(`[EMAIL] Sent monthly report for ${month} to ${env.WIFE_EMAIL}`);
+    const result = await res.json() as any;
+
+    if (result && result.success) {
+      console.log(`[EMAIL] Sent monthly report for ${month} to ${env.WIFE_EMAIL} via AppScript`);
+      return true;
     } else {
-      const errText = await res.text();
-      console.error(`[EMAIL] Failed to send: ${res.status}`, errText);
+      console.error(`[EMAIL] Failed to send via AppScript:`, result);
+      return false;
     }
   } catch (err) {
     console.error('[EMAIL] Error sending email:', err);
+    return false;
   }
 }

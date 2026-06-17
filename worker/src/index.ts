@@ -2,7 +2,7 @@ import { handleWebhook }       from './bot';
 import { dailySalaryCheck,
          checkIncompleteReminder,
          autoSendEmailTask,
-         sendMonthlyReport }   from './cron';
+         checkAndSendMonthlyReport }   from './cron';
 
 export interface Env {
   SUPABASE_URL:         string;
@@ -13,6 +13,7 @@ export interface Env {
   MONTHLY_FOOD_BUDGET?: string;
   MONTHLY_DEBT?:        string;
   RESEND_API_KEY?:      string;
+  APPSCRIPT_WEBHOOK_URL?: string;
   WIFE_EMAIL?:          string;
 }
 
@@ -52,8 +53,7 @@ export default {
     } else if (cron === '0 15 * * *') {
       await dailySalaryCheck(env);       // 00:00 JST mỗi ngày
       await checkIncompleteReminder(env); // Nhắc nếu chưa nhập đủ sau 3 ngày
-    } else if (cron === '0 0 1 * *') {
-      await sendMonthlyReport(env);      // 09:00 JST ngày 1
+      await checkAndSendMonthlyReport(env); // Kiểm tra và gửi báo cáo nếu hôm nay là ngày lãnh lương
     }
   },
 };

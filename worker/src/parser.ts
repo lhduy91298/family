@@ -56,21 +56,39 @@ export function getCurrentYearJST(): string {
   return String(nowJST.getUTCFullYear());
 }
 
-// Tháng hiện tại JST: "2024-01"
+// Tháng hiện tại JST (Theo chu kỳ tài chính: từ ngày nhận lương tháng hiện tại)
 export function getCurrentMonthJST(): string {
-  const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const y   = now.getUTCFullYear();
-  const m   = String(now.getUTCMonth() + 1).padStart(2, '0');
-  return `${y}-${m}`;
+  const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const currentY = nowJST.getUTCFullYear();
+  const currentM = nowJST.getUTCMonth() + 1;
+  const todayDay = nowJST.getUTCDate();
+  
+  const payDay = getSalaryPaymentDay(currentY, currentM);
+  const payDayJST = new Date(payDay.getTime() + 9 * 60 * 60 * 1000);
+  
+  if (todayDay < payDayJST.getUTCDate()) {
+    // Nếu chưa đến ngày lương của tháng này, thì vẫn tính là kỳ của tháng trước
+    const lastMonth = new Date(Date.UTC(currentY, currentM - 2, 1));
+    return `${lastMonth.getUTCFullYear()}-${String(lastMonth.getUTCMonth() + 1).padStart(2, '0')}`;
+  }
+  
+  return `${currentY}-${String(currentM).padStart(2, '0')}`;
 }
 
-// Tháng trước JST: "2023-12"
+// Tháng trước JST (Theo chu kỳ tài chính)
 export function getLastMonthJST(): string {
-  const now  = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const d    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
-  const y    = d.getUTCFullYear();
-  const m    = String(d.getUTCMonth() + 1).padStart(2, '0');
-  return `${y}-${m}`;
+  const curStr = getCurrentMonthJST();
+  const [y, m] = curStr.split('-');
+  const d = new Date(Date.UTC(parseInt(y), parseInt(m) - 2, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+// Tháng tiếp theo JST (Dành cho việc kiểm tra lương kỳ tới)
+export function getNextMonthJST(): string {
+  const curStr = getCurrentMonthJST();
+  const [y, m] = curStr.split('-');
+  const d = new Date(Date.UTC(parseInt(y), parseInt(m), 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 // "2024-01" → "tháng 01/2024"
@@ -90,17 +108,32 @@ export function formatTimestampJST(ts: string): string {
   return `${dd}/${mm}/${yy} ${hh}:${min}`;
 }
 
-// Tính ngày nhắc lương thực tế.
-// Ngày 15 là T7 hoặc CN → dời về thứ 6 ngày 13.
-export function getSalaryReminderDay(year: number, month: number): Date {
+// Tính ngày thực tế nhận lương (ngày công ty chuyển lương).
+// Ngày 15 là T7 → dời về thứ 6 (14), CN → dời về thứ 6 (13).
+export function getSalaryPaymentDay(year: number, month: number): Date {
   // month: 1-indexed. Tạo Date trong UTC+9 context
   const day15 = new Date(Date.UTC(year, month - 1, 15) - 9 * 60 * 60 * 1000);
   const jst15 = new Date(day15.getTime() + 9 * 60 * 60 * 1000);
   const dow   = jst15.getUTCDay(); // 0=CN, 6=T7
-  if (dow === 6 || dow === 0) {
+  if (dow === 6) {
+    // T7 → lùi về thứ 6 (ngày 14)
+    return new Date(Date.UTC(year, month - 1, 14) - 9 * 60 * 60 * 1000);
+  }
+  if (dow === 0) {
+    // CN → lùi về thứ 6 (ngày 13)
     return new Date(Date.UTC(year, month - 1, 13) - 9 * 60 * 60 * 1000);
   }
   return day15;
+}
+
+// Tính ngày nhắc nhập lương = 1 ngày TRƯỚC ngày nhận lương thực tế.
+// VD: 15 là weekday → nhắc ngày 14
+//     15 là T7 → lương ngày 14 → nhắc ngày 13 (Thứ 5)
+//     15 là CN → lương ngày 13 → nhắc ngày 12 (Thứ 5)
+export function getSalaryReminderDay(year: number, month: number): Date {
+  const payDay = getSalaryPaymentDay(year, month);
+  // Lùi 1 ngày (24h)
+  return new Date(payDay.getTime() - 24 * 60 * 60 * 1000);
 }
 
 // Hôm nay (JST) có phải ngày nhắc lương không?

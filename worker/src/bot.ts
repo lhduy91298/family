@@ -1,5 +1,5 @@
 import { Env }              from './index';
-import { sendMessage }      from './telegram';
+import { sendMessage, answerCallbackQuery }      from './telegram';
 import { sendMonthlyEmailToWife } from './email';
 import {
   getMonthRow, getAllMonthRows, getYearRows,
@@ -11,7 +11,7 @@ import {
   formatMoney, formatMoneyRaw,
   getCurrentMonthJST, getLastMonthJST, getCurrentYearJST,
   formatMonthDisplay,
-  getSalaryReminderDay,
+  getSalaryPaymentDay,
 } from './parser';
 
 // Helper: tính lại dư tháng + tích lũy khi có thay đổi bất kỳ
@@ -26,12 +26,21 @@ export async function recalcSurplus(env: Env, month: string): Promise<{ surplus:
 
 export async function handleWebhook(request: Request, env: Env): Promise<void> {
   const update = await request.json() as any;
-  if (!update?.message?.text) return;
 
-  const msg    = update.message;
+  if (update.callback_query) {
+    const cb = update.callback_query;
+    const userId = String(cb.from.id);
+    if (userId !== env.HUSBAND_ID) return;
+    const chatId = cb.message.chat.id;
+    await handleCallback(env, chatId, cb.data, cb.id);
+    return;
+  }
+
+  const msg = update?.message;
+  if (!msg) return;
+
   const userId = String(msg.from.id);
   const chatId = msg.chat.id;
-  const text   = msg.text.trim() as string;
 
   // Whitelist — chỉ chồng
   if (userId !== env.HUSBAND_ID) {
@@ -39,7 +48,60 @@ export async function handleWebhook(request: Request, env: Env): Promise<void> {
     return;
   }
 
+  // Xử lý file PDF bảng lương
+  if (msg.document) {
+    const doc = msg.document;
+    const mime = doc.mime_type || '';
+    const fileName = (doc.file_name || '').toLowerCase();
+
+    if (mime === 'application/pdf' || fileName.endsWith('.pdf')) {
+      const { savePayslipFileId } = await import('./supabase');
+      const { formatMonthDisplay } = await import('./parser');
+
+      // Xác định tháng: từ caption (VD: /bangluong 2026-04) hoặc tháng hiện tại
+      const { getCurrentMonthJST } = await import('./parser');
+      let month = getCurrentMonthJST();
+      const caption = (msg.caption || '').trim();
+      const monthMatch = caption.match(/(\d{4}-\d{2})/);
+      if (monthMatch) {
+        month = monthMatch[1];
+      }
+
+      await savePayslipFileId(env, month, doc.file_id);
+      await sendMessage(env, chatId,
+        `✅ Đã lưu file bảng lương cho ${formatMonthDisplay(month)}\n` +
+        `📄 File: ${doc.file_name || 'PDF'}\n\n` +
+        `File này sẽ được đính kèm khi gửi email báo cáo cho vợ.`
+      );
+      return;
+    }
+  }
+
+  if (!msg.text) return;
+  const text = msg.text.trim() as string;
+
   const userName = env.HUSBAND_NAME || 'Chong';
+
+  if (msg.reply_to_message && msg.reply_to_message.from.is_bot) {
+    const prompt = msg.reply_to_message.text || '';
+    if (prompt.includes('tiền Lương')) {
+      await routeCommand(env, chatId, userName, `/luong ${text}`);
+      return;
+    }
+    if (prompt.includes('tiền Ăn')) {
+      await routeCommand(env, chatId, userName, `/an ${text}`);
+      return;
+    }
+    if (prompt.includes('tiền Nợ')) {
+      await routeCommand(env, chatId, userName, `/no ${text}`);
+      return;
+    }
+    if (prompt.includes('Tiền Khác')) {
+      await routeCommand(env, chatId, userName, `/khac ${text}`);
+      return;
+    }
+  }
+
   await routeCommand(env, chatId, userName, text);
 }
 
@@ -70,6 +132,8 @@ async function routeCommand(env: Env, chatId: number, userName: string, text: st
     await handleEdit(env, chatId, userName, 'no', text);
   } else if (lower.startsWith('/suakhac ')) {
     await handleEdit(env, chatId, userName, 'khac', text);
+  } else if (lower.startsWith('/xoaan ') || lower === '/xoaan') {
+    await handleDeleteFood(env, chatId, text);
   } else if (lower.startsWith('/xoakhac ') || lower === '/xoakhac') {
     await handleDeleteOther(env, chatId, text);
   } else if (lower === '/nam') {
@@ -80,7 +144,10 @@ async function routeCommand(env: Env, chatId: number, userName: string, text: st
     await handleSendEmail(env, chatId);
   } else if (lower === '/web' || lower === '/link' || lower === '/dashboard') {
     await handleWeb(env, chatId);
+  } else if (lower === '/menu') {
+    await sendMenu(env, chatId);
   } else if (lower === '/giupdo' || lower === '/start' || lower === '/help') {
+    await sendMenu(env, chatId);
     await handleHelp(env, chatId);
   } else {
     await sendMessage(env, chatId, '❓ Không hiểu lệnh này.\nGõ /giupdo để xem hướng dẫn.');
@@ -105,24 +172,24 @@ async function handleSalary(env: Env, chatId: number, userName: string, text: st
   }
 
   const [y, m] = month.split('-').map(Number);
-  const remDate = getSalaryReminderDay(y, m);
+  const remDate = getSalaryPaymentDay(y, m);
   const remISO  = new Date(remDate.getTime() + 9*60*60*1000).toISOString().substring(0, 10);
 
   await writeField(env, month, 'salary', amount, remISO);
   console.log(`[SALARY] ${month} amount:${amount} by:${userName}`);
 
-  const defaultFood = parseFloat(env.MONTHLY_FOOD_BUDGET || '0') || 0;
-  let reply = `✅ Đã ghi lương ${formatMonthDisplay(month)}\n💴 Lương: +${formatMoney(amount)}\n\n`;
-  reply    += `🍱 Tiếp theo — Nhập tiền ăn:\n/an ${defaultFood > 0 ? formatMoneyRaw(defaultFood) : '5万'}`;
-  if (defaultFood > 0) reply += `\n(mặc định: ${formatMoney(defaultFood)})`;
-  await sendMessage(env, chatId, reply);
+  const reply = `✅ Đã ghi lương ${formatMonthDisplay(month)}\n💴 Lương: +${formatMoney(amount)}`;
+  const keyboard = {
+    inline_keyboard: [[{ text: '🍱 Nhập Tiền Ăn', callback_data: 'btn_an' }]]
+  };
+  await sendMessage(env, chatId, reply, keyboard);
 }
 
 // ── /an ─────────────────────────────────────────────────────
 async function handleFood(env: Env, chatId: number, userName: string, text: string): Promise<void> {
-  const amount = parseAmountFromCommand(text);
+  const { amount, name } = parseOtherCommand(text);
   if (!amount) {
-    await sendMessage(env, chatId, '❌ Không hiểu số tiền.\nVí dụ: /an 5万');
+    await sendMessage(env, chatId, '❌ Không hiểu cú pháp.\nVí dụ: /an 5万 Siêu thị');
     return;
   }
   const month = getCurrentMonthJST();
@@ -131,21 +198,35 @@ async function handleFood(env: Env, chatId: number, userName: string, text: stri
     await sendMessage(env, chatId, '⚠️ Chưa nhập lương tháng này.\nNhập trước: /luong [số tiền]');
     return;
   }
-  if (row.tien_an > 0) {
-    await sendMessage(env, chatId,
-      `⚠️ Đã ghi tiền ăn: ${formatMoney(row.tien_an)}\n` +
-      `Dùng /sửa an ${formatMoneyRaw(amount)} nếu muốn sửa lại.`
-    );
-    return;
-  }
-  await writeField(env, month, 'food', amount);
-  console.log(`[FOOD] ${month} amount:${amount} by:${userName}`);
+  
+  const oldAmount = row.tien_an || 0;
+  
+  if (oldAmount === 0) {
+    await writeField(env, month, 'food', amount, '');
+    console.log(`[FOOD BUDGET SET] ${month} amount:${amount} by:${userName}`);
 
-  const defaultDebt = parseFloat(env.MONTHLY_DEBT || '0') || 0;
-  let reply = `✅ Đã ghi tiền ăn ${formatMonthDisplay(month)}\n🍱 Tiền ăn: -${formatMoney(amount)}\n\n`;
-  reply    += `💳 Tiếp theo — Nhập tiền trả nợ:\n/no ${defaultDebt > 0 ? formatMoneyRaw(defaultDebt) : '3万'}`;
-  if (defaultDebt > 0) reply += `\n(mặc định: ${formatMoney(defaultDebt)})`;
-  await sendMessage(env, chatId, reply);
+    const reply = `✅ Đã thiết lập ngân sách tiền ăn ${formatMonthDisplay(month)}\n🍱 Tiền ăn: -${formatMoney(amount)}`;
+    const keyboard = {
+      inline_keyboard: [[{ text: '💳 Nhập Tiền Nợ', callback_data: 'btn_no' }]]
+    };
+    await sendMessage(env, chatId, reply, keyboard);
+  } else {
+    const newAmount = oldAmount + amount;
+    const entryStr = `${amount}:${name || 'Ăn uống'}`;
+    let newName = row.chi_tiet_an || '';
+    newName = newName ? `${newName}|${entryStr}` : entryStr;
+
+    await writeField(env, month, 'food', newAmount, newName);
+    console.log(`[FOOD DETAIL ADD] ${month} amount:${amount} name:${newName} by:${userName}`);
+
+    await recalcSurplus(env, month);
+
+    const reply = `✅ Đã ghi chi tiết tiền ăn ${formatMonthDisplay(month)}\n🛒 Thêm: ${formatMoney(amount)} (${name || 'Ăn uống'})\n(Tổng tiền ăn: ${formatMoney(newAmount)})`;
+    const keyboard = {
+      inline_keyboard: [[{ text: '💳 Nhập Tiền Nợ', callback_data: 'btn_no' }]]
+    };
+    await sendMessage(env, chatId, reply, keyboard);
+  }
 }
 
 // ── /no ─────────────────────────────────────────────────────
@@ -178,7 +259,7 @@ async function handleDebt(env: Env, chatId: number, userName: string, text: stri
   const result = await recalcSurplus(env, month);
   if (!result) return;
   const { surplus, cumul, row: updated } = result;
-  await sendMessage(env, chatId, buildMonthReport(month, updated.luong, updated.tien_an, updated.tien_no, updated.tien_khac || 0, updated.ten_khac || null, surplus, cumul));
+  await sendMessage(env, chatId, buildMonthReport(month, updated.luong, updated.tien_an, updated.tien_no, updated.tien_khac || 0, updated.ten_khac || null, surplus, cumul, updated.chi_tiet_an || null));
 
   // Cảnh báo chi tiêu
   if (surplus < 0) {
@@ -228,10 +309,65 @@ async function handleOther(env: Env, chatId: number, userName: string, text: str
 
   const result = await recalcSurplus(env, month);
   if (result) {
-    await sendMessage(env, chatId, buildMonthReport(month, result.row.luong, result.row.tien_an, result.row.tien_no, result.row.tien_khac || 0, result.row.ten_khac || null, result.surplus, result.cumul));
+    await sendMessage(env, chatId, buildMonthReport(month, result.row.luong, result.row.tien_an, result.row.tien_no, result.row.tien_khac || 0, result.row.ten_khac || null, result.surplus, result.cumul, result.row.chi_tiet_an || null));
   } else {
     await sendMessage(env, chatId, `✅ Đã ghi tiền khác: ${amount >= 0 ? '+' : ''}${formatMoney(amount)}`);
   }
+}
+
+// ── /xoaan ───────────────────────────────────────────────
+async function handleDeleteFood(env: Env, chatId: number, text: string): Promise<void> {
+  const parts = text.trim().split(/\s+/);
+
+  const month = getCurrentMonthJST();
+  const row   = await getMonthRow(env, month);
+  if (!row || !row.chi_tiet_an) {
+    await sendMessage(env, chatId, '🍱 Tháng này chưa có chi tiết tiền ăn nào.');
+    return;
+  }
+
+  const entries = row.chi_tiet_an.split('|').map(part => {
+    const match = part.match(/^([+-]?\d+):(.+)$/);
+    if (match) return { amount: parseInt(match[1]), name: match[2].trim(), raw: part };
+    return null;
+  }).filter(Boolean) as { amount: number; name: string; raw: string }[];
+
+  if (entries.length === 0) {
+    await sendMessage(env, chatId, '🍱 Tháng này chưa có chi tiết tiền ăn nào.');
+    return;
+  }
+
+  const indexStr = parts[1];
+  
+  if (!indexStr) {
+    let list = '🍱 DANH SÁCH TIỀN ĂN\n\n';
+    entries.forEach((e, i) => {
+      list += `${i + 1}. ${e.name}: ${formatMoney(e.amount)}\n`;
+    });
+    list += `\n🗑 Để xóa, gõ: /xoaan [số thứ tự]\nVí dụ: /xoaan 1`;
+    await sendMessage(env, chatId, list);
+    return;
+  }
+
+  const idx = parseInt(indexStr) - 1;
+  if (isNaN(idx) || idx < 0 || idx >= entries.length) {
+    await sendMessage(env, chatId, `❌ Số thứ tự không hợp lệ. Chọn từ 1 đến ${entries.length}.`);
+    return;
+  }
+
+  const deleted = entries[idx];
+  entries.splice(idx, 1);
+
+  const newTotal = row.tien_an - deleted.amount;
+  const newName  = entries.map(e => `${e.amount}:${e.name}`).join('|');
+
+  await writeField(env, month, 'food', newTotal, newName);
+  await recalcSurplus(env, month);
+
+  await sendMessage(env, chatId,
+    `🗑 Đã xóa: ${deleted.name} (${formatMoney(deleted.amount)})\n` +
+    `🍱 Tổng tiền ăn còn lại: ${formatMoney(newTotal)}`
+  );
 }
 
 // ── /xoakhac ───────────────────────────────────────────────
@@ -259,7 +395,7 @@ async function handleDeleteOther(env: Env, chatId: number, text: string): Promis
     return;
   }
 
-  const indexStr = parts[2];
+  const indexStr = parts[1];
   
   // Nếu không có số → hiện danh sách
   if (!indexStr) {
@@ -311,18 +447,20 @@ async function handleEdit(env: Env, chatId: number, userName: string, field: str
     return;
   }
   const month = getCurrentMonthJST();
+  const row   = await getMonthRow(env, month);
   let fieldName = '';
 
   if (field === 'luong') {
     await writeField(env, month, 'salary', amount); fieldName = 'Lương';
   } else if (field === 'an') {
-    await writeField(env, month, 'food', amount);   fieldName = 'Tiền ăn';
+    await writeField(env, month, 'food', amount, row?.chi_tiet_an || undefined); fieldName = 'Ngân sách tiền ăn';
   } else if (field === 'no') {
     await writeField(env, month, 'debt', amount);   fieldName = 'Tiền nợ';
   } else if (field === 'khac') {
     const partsWithoutCmd = parts.slice(1).join(' '); // Re-join to parse amount and name
     const { name } = parseOtherCommand('/khac ' + partsWithoutCmd); // Trick parseOtherCommand by prepending /khac
-    await writeField(env, month, 'other', amount, name); fieldName = 'Tiền khác';
+    const entryStr = `${amount >= 0 ? '+' : ''}${amount}:${name || 'Không tên'}`;
+    await writeField(env, month, 'other', amount, entryStr); fieldName = 'Tiền khác';
   } else {
     await sendMessage(env, chatId, '❌ Chỉ sửa được: luong, an, no, khac');
     return;
@@ -333,7 +471,7 @@ async function handleEdit(env: Env, chatId: number, userName: string, field: str
   if (result) {
     await sendMessage(env, chatId,
       `✅ Đã sửa ${fieldName} → ${formatMoney(amount)}\n\n` +
-      buildMonthReport(month, result.row.luong, result.row.tien_an, result.row.tien_no, result.row.tien_khac || 0, result.row.ten_khac || null, result.surplus, result.cumul)
+      buildMonthReport(month, result.row.luong, result.row.tien_an, result.row.tien_no, result.row.tien_khac || 0, result.row.ten_khac || null, result.surplus, result.cumul, result.row.chi_tiet_an || null)
     );
   } else {
     await sendMessage(env, chatId, `✅ Đã sửa ${fieldName} → ${formatMoney(amount)}`);
@@ -349,7 +487,7 @@ async function handleMonthReport(env: Env, chatId: number, month: string): Promi
   }
   const surplus = row.luong - row.tien_an - row.tien_no + (row.tien_khac || 0);
   const cumul   = row.tich_luy || await calcCumulativeSurplus(env, month, surplus);
-  await sendMessage(env, chatId, buildMonthReport(month, row.luong, row.tien_an, row.tien_no, row.tien_khac || 0, row.ten_khac || null, surplus, cumul));
+  await sendMessage(env, chatId, buildMonthReport(month, row.luong, row.tien_an, row.tien_no, row.tien_khac || 0, row.ten_khac || null, surplus, cumul, row.chi_tiet_an || null));
 }
 
 // ── /gui mail ────────────────────────────────────────────────
@@ -368,12 +506,17 @@ async function handleSendEmail(env: Env, chatId: number): Promise<void> {
   }
 
   const surplus = row.luong - row.tien_an - row.tien_no + (row.tien_khac || 0);
-  await sendMonthlyEmailToWife(env, month, row.luong, row.tien_an, row.tien_no, row.tien_khac || 0, row.ten_khac || null, surplus, row.tich_luy);
+  const success = await sendMonthlyEmailToWife(env, month, row.luong, row.tien_an, row.tien_no, row.tien_khac || 0, row.ten_khac || null, surplus, row.tich_luy, row.bang_luong_file_id);
   
-  const { markEmailSent } = await import('./supabase');
-  await markEmailSent(env, month);
-  
-  await sendMessage(env, chatId, '✅ Đã gửi email báo cáo thủ công cho vợ!');
+  if (success) {
+    const { markEmailSent, buildMonthReport } = await import('./supabase');
+    await markEmailSent(env, month);
+    const reportText = buildMonthReport(month, row.luong, row.tien_an, row.tien_no, row.tien_khac || 0, row.ten_khac || null, surplus, row.tich_luy, row.chi_tiet_an || null);
+    const attachNote = row.bang_luong_file_id ? '\n📎 Đã đính kèm file bảng lương PDF.' : '\n📎 Không có file bảng lương đính kèm.';
+    await sendMessage(env, chatId, `✅ Đã gửi email báo cáo thủ công cho vợ (${env.WIFE_EMAIL})!${attachNote}\n\nNội dung đã gửi:\n${reportText}`);
+  } else {
+    await sendMessage(env, chatId, `❌ Lỗi khi gửi email! Chưa gửi được cho ${env.WIFE_EMAIL}. Hãy kiểm tra lại biến môi trường APPSCRIPT_WEBHOOK_URL hoặc script trên Google Apps Script.`);
+  }
 }
 
 // ── /web ───────────────────────────────────────────────────
@@ -381,7 +524,7 @@ async function handleWeb(env: Env, chatId: number): Promise<void> {
   await sendMessage(env, chatId, 
     '🌐 **WEB DASHBOARD**\n\n' +
     'Truy cập link bên dưới để xem biểu đồ và nhập dữ liệu:\n' +
-    '👉 https://family-expense-dashboard.pages.dev/'
+    '👉 https://xay-chuong.pages.dev/'
   );
 }
 
@@ -469,6 +612,37 @@ async function handleCompare(env: Env, chatId: number): Promise<void> {
     `💰 Dư:         ${formatMoney(lastDu).padEnd(12)}  ${formatMoney(curDu).padEnd(10)} ${getDiffStr(lastDu, curDu)}`;
     
   await sendMessage(env, chatId, reply);
+}
+
+// ── /menu & Callbacks ──────────────────────────────────────
+async function sendMenu(env: Env, chatId: number): Promise<void> {
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: '💴 Nhập Lương', callback_data: 'btn_luong' },
+        { text: '🍱 Tiền Ăn', callback_data: 'btn_an' }
+      ],
+      [
+        { text: '💳 Tiền Nợ', callback_data: 'btn_no' },
+        { text: '📦 Tiền Khác', callback_data: 'btn_khac' }
+      ]
+    ]
+  };
+  await sendMessage(env, chatId, '👇 Chọn mục bạn muốn nhập (hoặc gõ lệnh trực tiếp):', keyboard);
+}
+
+async function handleCallback(env: Env, chatId: number, data: string, cbId: string): Promise<void> {
+  await answerCallbackQuery(env, cbId);
+
+  if (data === 'btn_luong') {
+    await sendMessage(env, chatId, '💴 Vui lòng nhập số tiền Lương (ví dụ: 20万, 200000):', { force_reply: true });
+  } else if (data === 'btn_an') {
+    await sendMessage(env, chatId, '🍱 Vui lòng nhập số tiền Ăn (ví dụ: 5万, 50000):', { force_reply: true });
+  } else if (data === 'btn_no') {
+    await sendMessage(env, chatId, '💳 Vui lòng nhập số tiền Nợ (ví dụ: 3万, 30000):', { force_reply: true });
+  } else if (data === 'btn_khac') {
+    await sendMessage(env, chatId, '📦 Vui lòng nhập Tiền Khác (ví dụ: +1万 Thưởng, -5000 Mua đồ):', { force_reply: true });
+  }
 }
 
 // ── /giupdo ────────────────────────────────────────────────
